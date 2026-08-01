@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#f4f6f9">
+<title>Doppler</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+:root{
+  /* KNMI-inspired light palette */
+  --bg:#f4f6f9; --surface:#ffffff; --surface-2:#eef2f7;
+  --ink:#1a2230; --ink-soft:#5a6678; --ink-faint:#8a96a8;
+  --line:#e2e8f0; --line-bold:#cdd6e3;
+  --knmi:#0a4ea3; --knmi-light:#3d7bc9; --knmi-bg:#e8f0fa;
+  /* Dutch warning codes */
+  --groen:#2e9e5b; --geel:#f5c518; --oranje:#f08020; --rood:#e23b3b;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,sans-serif;
+  --mono:'SF Mono',ui-monospace,'Cascadia Mono',Menlo,Consolas,monospace;
+  --safe-b:env(safe-area-inset-bottom); --safe-t:env(safe-area-inset-top);
+  --shadow:0 2px 12px rgba(26,34,48,.08);
+  --shadow-lg:0 6px 24px rgba(26,34,48,.14);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+#map{position:absolute;inset:0;background:var(--bg)}
+.leaflet-container{background:var(--bg);font-family:var(--sans)}
+.leaflet-control-attribution{background:rgba(255,255,255,.8)!important;color:#9aa6b6!important;font-size:9px}
+.leaflet-control-attribution a{color:var(--knmi-light)!important}
+
+/* ====== TOP: warning banner + brand (display only) ====== */
+.top{position:absolute;top:0;left:0;right:0;z-index:1000;pointer-events:none;
+  padding:calc(10px + var(--safe-t)) 12px 10px;
+  background:linear-gradient(180deg,rgba(244,246,249,.96) 40%,transparent)}
+.toprow{display:flex;align-items:center;gap:10px}
+.brand{display:flex;align-items:center;gap:8px;pointer-events:auto}
+.brand .mark{width:30px;height:30px;border-radius:9px;background:var(--knmi);display:grid;place-items:center;
+  box-shadow:var(--shadow)}
+.brand .mark svg{width:18px;height:18px}
+.brand .nm{font-size:17px;font-weight:800;letter-spacing:-.3px;color:var(--ink)}
+.searchbtn{margin-left:auto;pointer-events:auto;width:40px;height:40px;border-radius:11px;background:var(--surface);
+  border:1px solid var(--line);display:grid;place-items:center;box-shadow:var(--shadow);cursor:pointer}
+.searchbtn svg{width:18px;height:18px;stroke:var(--ink-soft)}
+
+/* warning code banner — calm, not dominant (KNMI lesson) */
+.codebanner{margin-top:10px;pointer-events:auto;display:flex;align-items:center;gap:10px;
+  background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--groen);
+  border-radius:12px;padding:9px 13px;box-shadow:var(--shadow);cursor:pointer;transition:border-color .3s}
+.codebanner .badge{font-size:11px;font-weight:800;letter-spacing:.3px;padding:3px 9px;border-radius:7px;
+  color:#fff;background:var(--groen);white-space:nowrap}
+.codebanner .txt{font-size:13px;color:var(--ink);font-weight:600;flex:1;min-width:0;line-height:1.3}
+.codebanner .txt small{display:block;font-size:10.5px;color:var(--ink-faint);font-weight:500;margin-top:1px}
+.codebanner .chev{color:var(--ink-faint);font-size:12px}
+.codebanner.geel{border-left-color:var(--geel)} .codebanner.geel .badge{background:var(--geel);color:#3a2e00}
+.codebanner.oranje{border-left-color:var(--oranje)} .codebanner.oranje .badge{background:var(--oranje)}
+.codebanner.rood{border-left-color:var(--rood)} .codebanner.rood .badge{background:var(--rood);animation:roodpuls 1.6s infinite}
+@keyframes roodpuls{0%,100%{box-shadow:0 0 0 rgba(226,59,59,0)}50%{box-shadow:0 0 12px rgba(226,59,59,.5)}}
+
+/* ====== DETAIL SHEET (severe data) ====== */
+.sheet{position:absolute;left:12px;right:12px;z-index:1001;
+  top:calc(112px + var(--safe-t));
+  background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:15px;
+  box-shadow:var(--shadow-lg);transform:translateY(-10px);opacity:0;pointer-events:none;
+  transition:all .26s cubic-bezier(.2,.8,.2,1)}
+.sheet.open{transform:translateY(0);opacity:1;pointer-events:auto}
+.sheet h3{font-size:11px;letter-spacing:.6px;color:var(--ink-faint);font-weight:700;text-transform:uppercase;
+  margin-bottom:13px;display:flex;justify-content:space-between;align-items:center}
+.sheet h3 .loc{font-family:var(--mono);font-size:11px;color:var(--ink-soft);text-transform:none;letter-spacing:0}
+.metric{margin-bottom:13px}
+.metric:last-of-type{margin-bottom:0}
+.metric .mr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+.metric .mr .name{font-size:13px;color:var(--ink);font-weight:600}
+.metric .mr .name small{color:var(--ink-faint);font-weight:500;font-size:11px}
+.metric .mr .val{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--ink)}
+.metric .track{height:7px;background:var(--surface-2);border-radius:4px;overflow:hidden}
+.metric .fill{height:100%;border-radius:4px;width:0;transition:width .7s cubic-bezier(.2,.8,.2,1)}
+.sheet .src{font-size:10px;color:var(--ink-faint);margin-top:14px;padding-top:12px;border-top:1px solid var(--line);line-height:1.5}
+
+/* ====== TAP PROBE ====== */
+.probe{position:absolute;z-index:900;background:var(--surface);border:1px solid var(--line-bold);
+  border-radius:12px;padding:10px 12px;font-size:12px;pointer-events:none;
+  transform:translate(-50%,calc(-100% - 16px));opacity:0;transition:opacity .15s;white-space:nowrap;
+  box-shadow:var(--shadow-lg)}
+.probe.show{opacity:1}
+.probe .r{display:flex;justify-content:space-between;gap:18px;line-height:1.9}
+.probe .r span{color:var(--ink-faint)} .probe .r b{color:var(--ink);font-family:var(--mono);font-weight:700}
+.probe::after{content:'';position:absolute;bottom:-7px;left:50%;transform:translateX(-50%);
+  width:0;height:0;border:7px solid transparent;border-top-color:var(--surface);border-bottom:0;
+  filter:drop-shadow(0 1px 0 var(--line-bold))}
+.probedot{width:16px;height:16px;border-radius:50%;border:3px solid var(--knmi);background:rgba(10,78,163,.2)}
+
+/* ====== BOTTOM: all interaction ====== */
+.bottom{position:absolute;left:0;right:0;bottom:0;z-index:1000}
+.floats{position:absolute;right:12px;bottom:calc(100% + 11px);display:flex;flex-direction:column;gap:10px}
+.fbtn{width:48px;height:48px;border-radius:14px;background:var(--surface);border:1px solid var(--line);
+  box-shadow:var(--shadow);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  cursor:pointer;transition:transform .1s}
+.fbtn:active{transform:scale(.9)}
+.fbtn svg{width:20px;height:20px;stroke:var(--ink-soft);fill:none}
+.fbtn .x{font-size:7.5px;font-weight:700;color:var(--ink-faint);letter-spacing:.3px}
+.fbtn.on{background:var(--knmi);border-color:var(--knmi)}
+.fbtn.on svg{stroke:#fff} .fbtn.on .x{color:rgba(255,255,255,.85)}
+
+.deck{background:var(--surface);border-top:1px solid var(--line);border-radius:22px 22px 0 0;
+  padding:13px 13px calc(11px + var(--safe-b));box-shadow:0 -4px 20px rgba(26,34,48,.06)}
+.transport{display:flex;align-items:center;gap:13px;margin-bottom:11px}
+.play{width:54px;height:54px;flex:none;border:none;border-radius:17px;background:var(--knmi);color:#fff;
+  font-size:21px;cursor:pointer;display:grid;place-items:center;box-shadow:0 3px 12px rgba(10,78,163,.3);transition:transform .1s}
+.play:active{transform:scale(.93)}
+.play svg{width:24px;height:24px;fill:#fff}
+.tinfo{flex:1;min-width:0}
+.tinfo .clk{font-size:27px;font-weight:800;line-height:1;letter-spacing:-1px;color:var(--ink)}
+.tinfo .st{font-size:12px;margin-top:3px;font-weight:600;display:flex;align-items:center;gap:6px;color:var(--ink-soft)}
+.tinfo .st .pip{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.tinfo .st.live{color:var(--groen)} .tinfo .st.fc{color:var(--knmi)}
+.spd{flex:none;width:50px;height:50px;border-radius:15px;font-size:15px;font-weight:800;
+  background:var(--surface-2);border:1px solid var(--line);color:var(--ink);cursor:pointer}
+
+.scrub{position:relative;height:42px;margin-bottom:2px;touch-action:none}
+.tk{position:absolute;top:21px;left:3px;right:3px;height:5px;transform:translateY(-50%);background:var(--surface-2);border-radius:3px}
+.tk .past{position:absolute;left:0;top:0;bottom:0;background:var(--line-bold);border-radius:3px}
+.tk .fcz{position:absolute;top:0;bottom:0;right:0;border-radius:3px;
+  background:repeating-linear-gradient(90deg,rgba(10,78,163,.25) 0 4px,transparent 4px 9px)}
+.tk .nowln{position:absolute;top:-6px;bottom:-6px;width:2.5px;background:var(--knmi);border-radius:2px}
+.thumb{position:absolute;top:21px;width:24px;height:24px;border-radius:50%;transform:translate(-50%,-50%);
+  background:#fff;border:3px solid var(--knmi);box-shadow:0 2px 8px rgba(10,78,163,.4);pointer-events:none}
+.scrub input{position:absolute;inset:-9px 0;width:100%;height:calc(100% + 18px);margin:0;opacity:0;cursor:pointer}
+.tlabels{display:flex;justify-content:space-between;font-size:10px;font-weight:600;color:var(--ink-faint);padding:0 3px;margin-bottom:12px}
+.tlabels .now{color:var(--knmi)}
+
+.layerbar{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:1px;margin:0 -2px}
+.layerbar::-webkit-scrollbar{display:none}
+.lchip{flex:none;min-width:66px;height:56px;border:1px solid var(--line);border-radius:15px;background:var(--surface-2);
+  color:var(--ink-soft);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  transition:all .15s;padding:0 11px;position:relative}
+.lchip:active{transform:scale(.94)}
+.lchip svg{width:20px;height:20px;stroke:currentColor;fill:none}
+.lchip .t{font-size:9px;font-weight:700;letter-spacing:.2px;white-space:nowrap}
+.lchip.on{color:#fff;background:var(--knmi);border-color:var(--knmi);box-shadow:0 2px 10px rgba(10,78,163,.25)}
+.lchip .badge{position:absolute;top:-6px;right:-4px;background:var(--rood);color:#fff;font-size:9px;font-weight:800;
+  padding:1px 5px;border-radius:8px;border:2px solid var(--surface);font-family:var(--mono)}
+.lchip.on .badge{border-color:var(--knmi)}
+
+.opacity-pop{position:absolute;bottom:calc(100% + 9px);left:0;background:var(--surface);border:1px solid var(--line-bold);
+  border-radius:13px;padding:11px 13px;display:none;align-items:center;gap:10px;z-index:1100;box-shadow:var(--shadow-lg)}
+.opacity-pop.show{display:flex}
+.opacity-pop .lab{font-size:10px;font-weight:700;color:var(--ink-soft);white-space:nowrap}
+.opacity-pop input{width:120px;accent-color:var(--knmi)}
+
+/* legend strip */
+.legend{display:flex;align-items:center;gap:9px;margin-top:11px;padding-top:11px;border-top:1px solid var(--line)}
+.legend .cap{font-size:10px;font-weight:700;color:var(--ink-faint);flex:none}
+.gbar{flex:1;height:8px;border-radius:4px;
+  background:linear-gradient(90deg,#a8d5ff 0%,#5badf0 18%,#3fc97a 36%,#c3e84a 52%,#f5d020 66%,#f08020 80%,#e23b3b 92%,#b832d0 100%)}
+.gsc{display:flex;justify-content:space-between;font-size:8.5px;font-weight:600;color:var(--ink-faint);margin-top:3px;padding:0 1px}
+
+/* DRIVE mode */
+body.drive .codebanner,body.drive .searchbtn,body.drive .legend{display:none}
+body.drive .tinfo .clk{font-size:40px}
+body.drive .tinfo .st{font-size:14px}
+body.drive .play{width:66px;height:66px}
+body.drive .spd{width:60px;height:60px;font-size:17px}
+body.drive .layerbar{display:none}
+body.drive .scrub{height:56px}
+body.drive .thumb{width:32px;height:32px}
+
+/* loader */
+.loader{position:absolute;inset:0;z-index:2000;display:grid;place-items:center;background:var(--bg);transition:opacity .5s}
+.loader.gone{opacity:0;pointer-events:none}
+.loader .ring{width:54px;height:54px;border:4px solid var(--surface-2);border-top-color:var(--knmi);border-radius:50%;
+  animation:spin 1s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loader .tx{font-size:13px;color:var(--ink-soft);font-weight:600;text-align:center}
+
+/* toast + hint */
+.toast{position:absolute;left:50%;bottom:calc(280px + var(--safe-b));transform:translateX(-50%) translateY(14px);
+  z-index:1500;background:var(--ink);color:#fff;border-radius:12px;padding:10px 16px;font-size:12px;font-weight:600;
+  opacity:0;transition:all .3s;pointer-events:none;max-width:84%;text-align:center;line-height:1.5;box-shadow:var(--shadow-lg)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.hint{position:absolute;left:50%;bottom:calc(296px + var(--safe-b));transform:translateX(-50%);z-index:1400;
+  background:var(--knmi-bg);border:1px solid var(--knmi-light);border-radius:20px;padding:8px 15px;font-size:11px;
+  color:var(--knmi);font-weight:600;opacity:0;transition:opacity .4s;pointer-events:none}
+.hint.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="loader" id="loader"><div><div class="ring"></div><div class="tx">Radar laden…</div></div></div>
+
+<div class="top">
+  <div class="toprow">
+    <div class="brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none"><path d="M4 14a4 4 0 010-8 5 5 0 019.6-1.5A4.5 4.5 0 1118 16H6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 19l-1 2M13 19l-1 2M11 20l-1 2" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></div>
+      <span class="nm">Doppler</span>
+    </div>
+    <button class="searchbtn" id="searchBtn"><svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke-width="2"/><path d="M21 21l-4-4" stroke-width="2" stroke-linecap="round"/></svg></button>
+  </div>
+  <div class="codebanner" id="codebanner">
+    <span class="badge" id="cbBadge">CODE –</span>
+    <div class="txt" id="cbTxt">Onweersdreiging bepalen…<small id="cbSub">CAPE · shear · hagel</small></div>
+    <span class="chev">›</span>
+  </div>
+</div>
+
+<div class="sheet" id="sheet">
+  <h3>Onweer-ingrediënten <span class="loc" id="shLoc">—</span></h3>
+  <div class="metric"><div class="mr"><span class="name">CAPE <small>onweer-energie</small></span><span class="val" id="vCape">–</span></div><div class="track"><div class="fill" id="fCape"></div></div></div>
+  <div class="metric"><div class="mr"><span class="name">Windschering <small>0-6 km · rotatie</small></span><span class="val" id="vShear">–</span></div><div class="track"><div class="fill" id="fShear"></div></div></div>
+  <div class="metric"><div class="mr"><span class="name">Hagel <small>potentieel</small></span><span class="val" id="vHail">–</span></div><div class="track"><div class="fill" id="fHail"></div></div></div>
+  <div class="metric"><div class="mr"><span class="name">Lifted Index <small>instabiliteit</small></span><span class="val" id="vLi">–</span></div><div class="track"><div class="fill" id="fLi"></div></div></div>
+  <div class="src" id="shSrc">Berekend voor kaartmidden. Verschuif de kaart om elders te peilen. Bron: Open-Meteo (HARMONIE/ECMWF).</div>
+</div>
+
+<div class="probe" id="probe"><div class="r"><span>Neerslag</span><b id="pDbz">–</b></div><div class="r"><span>CAPE</span><b id="pCape">–</b></div><div class="r"><span>Positie</span><b id="pLL">–</b></div></div>
+
+<div class="bottom">
+  <div class="floats">
+    <button class="fbtn" id="driveBtn"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2" stroke-width="2"/><circle cx="8" cy="15" r="1.3" fill="currentColor"/><circle cx="16" cy="15" r="1.3" fill="currentColor"/></svg><span class="x">DRIVE</span></button>
+    <button class="fbtn" id="locBtn"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke-width="2" stroke-linecap="round"/></svg><span class="x">GPS</span></button>
+  </div>
+  <div class="deck">
+    <div class="transport">
+      <button class="play" id="playBtn"><svg id="playIcon" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+      <div class="tinfo"><div class="clk" id="clk">--:--</div><div class="st live" id="st"><span class="pip"></span><span id="sttx">verbinden…</span></div></div>
+      <button class="spd" id="spdBtn">2×</button>
+    </div>
+    <div class="scrub" id="scrub">
+      <div class="tk"><div class="past" id="past"></div><div class="fcz" id="fcz"></div><div class="nowln" id="nowln"></div></div>
+      <div class="thumb" id="thumb"></div>
+      <input type="range" id="slider" min="0" max="0" value="0" step="1" aria-label="tijdlijn">
+    </div>
+    <div class="tlabels"><span id="tStart">-2u</span><span class="now">NU</span><span id="tEnd">+2u</span></div>
+    <div class="layerbar" id="layerbar">
+      <button class="lchip on" data-l="radar"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke-width="2"/><circle cx="12" cy="12" r="4" stroke-width="2"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg><span class="t">Radar</span>
+        <div class="opacity-pop" id="opPop"><span class="lab">Dekking</span><input type="range" id="opSlider" min="20" max="100" value="82"></div></button>
+      <button class="lchip on" data-l="bolt"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h6l-1 8 9-12h-6z" stroke-width="2" stroke-linejoin="round"/></svg><span class="t">Bliksem</span></button>
+      <button class="lchip" data-l="cells"><svg viewBox="0 0 24 24"><path d="M3 20L12 4l9 16z" stroke-width="2" stroke-linejoin="round"/></svg><span class="t">Cellen</span></button>
+      <button class="lchip" data-l="cape"><svg viewBox="0 0 24 24"><path d="M12 3c3 4 5 6 5 10a5 5 0 01-10 0c0-2 1-3 2-4 0 1 1 2 2 2 0-3-1-5 1-8z" stroke-width="2" stroke-linejoin="round"/></svg><span class="t">CAPE</span></button>
+      <button class="lchip" data-l="sat"><svg viewBox="0 0 24 24"><path d="M5 13a7 7 0 017-7M5 9a3 3 0 013-3" stroke-width="2" stroke-linecap="round"/><circle cx="6" cy="18" r="2" stroke-width="2"/><path d="M13 19h6a2 2 0 002-2v-1" stroke-width="2" stroke-linecap="round"/></svg><span class="t">Sat</span></button>
+      <button class="lchip" data-l="hail"><svg viewBox="0 0 24 24"><path d="M12 3v18M5 7l14 10M19 7L5 17" stroke-width="2" stroke-linecap="round"/></svg><span class="t">Hagel</span></button>
+    </div>
+    <div class="legend">
+      <span class="cap">Neerslag</span><div class="gbar"></div>
+    </div>
+    <div class="gsc"><span>licht</span><span>matig</span><span>zwaar</span><span>extreem</span></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="hint" id="hint">Tik op de kaart voor neerslag + CAPE op dat punt</div>
+
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const HOME=[51.886,5.434];
+/* ============================================================
+   BACKEND — vul hier je Railway-URL in voor KNMI hoge-res radar.
+   Leeg laten = automatisch RainViewer (werkt meteen, lager detail).
+   Voorbeeld: const BACKEND="https://doppler-backend.up.railway.app";
+   ============================================================ */
+const BACKEND="";
+const USE_KNMI=BACKEND.length>0;
+const store={get(k,d){try{const v=JSON.parse(localStorage.getItem('dop_'+k));return v==null?d:v;}catch(e){return d;}},set(k,v){try{localStorage.setItem('dop_'+k,JSON.stringify(v));}catch(e){}}};
+
+const savedView=store.get('view',null);
+const map=L.map('map',{zoomControl:false,attributionControl:true,zoomSnap:.5,tap:false}).setView(savedView?savedView.c:HOME,savedView?savedView.z:7.5);
+/* KNMI uses a light/positron base map for calm, readable look */
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© OSM © CARTO · RainViewer · Blitzortung · Open-Meteo'}).addTo(map);
+['cape','sat','radar','bolt','cells','probe','labels'].forEach((p,i)=>{map.createPane(p);map.getPane(p).style.zIndex=400+i*30;});
+map.getPane('labels').style.pointerEvents='none';map.getPane('labels').style.zIndex=650;
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png',{maxZoom:19,pane:'labels'}).addTo(map);
+
+function toast(m,ms){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._x);t._x=setTimeout(()=>t.classList.remove('show'),ms||2600);}
+
+const PLAY='<path d="M8 5v14l11-7z"/>',PAUSE='<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>';
+
+let host='',frames=[],nowIdx=0,cur=0,rLayers={},radarOpacity=store.get('opacity',82)/100,radarOn=store.get('on_radar',true);
+
+async function loadRadar(){
+  if(USE_KNMI){return loadRadarKNMI();}
+  return loadRadarRainViewer();
+}
+async function loadRadarRainViewer(){
+  const r=await fetch('https://api.rainviewer.com/public/weather-maps.json');const j=await r.json();host=j.host;
+  const past=(j.radar.past||[]).map(f=>({type:'past',time:f.time,path:f.path}));
+  const nc=(j.radar.nowcast||[]).map(f=>({type:'nc',time:f.time,path:f.path}));
+  frames=[...past,...nc];nowIdx=past.length-1;cur=nowIdx;$('slider').max=frames.length-1;$('slider').value=cur;
+  setExtents();layoutScrub();showFrame(cur);
+}
+async function loadRadarKNMI(){
+  const r=await fetch(BACKEND+'/api/frames');
+  if(!r.ok)throw new Error('backend frames '+r.status);
+  const j=await r.json();
+  frames=j.frames.map(f=>({type:f.type==='nowcast'?'nc':'past',time:f.time,id:f.id,bounds:f.bounds}));
+  nowIdx=frames.map(f=>f.type).lastIndexOf('past');if(nowIdx<0)nowIdx=frames.length-1;
+  cur=nowIdx;$('slider').max=frames.length-1;$('slider').value=cur;
+  setExtents();layoutScrub();showFrame(cur);
+  loadCellsKNMI();
+}
+function setExtents(){if(frames.length){$('tStart').textContent='-'+Math.round((frames[nowIdx].time-frames[0].time)/60)+'m';$('tEnd').textContent='+'+Math.round((frames[frames.length-1].time-frames[nowIdx].time)/60)+'m';}}
+
+/* RainViewer scheme 2 = light-friendly blue->red; works on light base */
+const rUrl=f=>`${host}${f.path}/512/{z}/{x}/{y}/2/1_1.png`;
+function rLayer(i){
+  if(rLayers[i])return rLayers[i];
+  let l;
+  if(USE_KNMI){
+    const f=frames[i];const b=f.bounds; // [S,W,N,E]
+    l=L.imageOverlay(BACKEND+'/api/radar/'+f.id+'.png',[[b[0],b[1]],[b[2],b[3]]],{pane:'radar',opacity:0,crossOrigin:true});
+  }else{
+    l=L.tileLayer(rUrl(frames[i]),{pane:'radar',opacity:0,maxZoom:19,crossOrigin:true});
+  }
+  l.addTo(map);rLayers[i]=l;return l;
+}
+let pre=null;
+function showFrame(i){
+  if(!frames.length)return;cur=i;const l=rLayer(i);
+  Object.keys(rLayers).forEach(k=>{if(+k!==i)rLayers[k].setOpacity(0);});
+  l.setOpacity(radarOn?radarOpacity:0);
+  const d=new Date(frames[i].time*1000);$('clk').textContent=d.toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'});
+  const st=$('st'),tx=$('sttx');
+  if(frames[i].type==='nc'){const m=Math.round((frames[i].time-frames[nowIdx].time)/60);st.className='st fc';tx.innerHTML='Verwachting · <b>+'+m+' min</b>';}
+  else if(i===nowIdx){st.className='st live';tx.innerHTML='<b>Live</b> · nu';}
+  else{const m=Math.round((frames[nowIdx].time-frames[i].time)/60);st.className='st';tx.textContent='−'+m+' min';}
+  $('slider').value=i;positionThumb();clearTimeout(pre);pre=setTimeout(()=>{if(frames[i+1])rLayer(i+1);},110);
+}
+function positionThumb(){const max=+$('slider').max||1;$('thumb').style.left=(3+(cur/max)*($('scrub').clientWidth-6))+'px';}
+function layoutScrub(){const max=frames.length-1||1;const pct=nowIdx/max*100;$('past').style.width=pct+'%';$('nowln').style.left=pct+'%';$('fcz').style.left=pct+'%';$('fcz').style.width=(100-pct)+'%';positionThumb();}
+
+let playing=false,timer=null,speeds=[1,2,4],si=store.get('speed',1);$('spdBtn').textContent=speeds[si]+'×';
+function step(){let n=cur+1;if(n>=frames.length)n=0;showFrame(n);}
+function play(){playing=true;$('playIcon').innerHTML=PAUSE;const base=460;const t=()=>{step();const d=cur===frames.length-1?base*2.6/speeds[si]:base/speeds[si];timer=setTimeout(t,d);};t();}
+function pause(){playing=false;$('playIcon').innerHTML=PLAY;clearTimeout(timer);}
+$('playBtn').onclick=()=>playing?pause():play();
+$('spdBtn').onclick=()=>{si=(si+1)%speeds.length;$('spdBtn').textContent=speeds[si]+'×';store.set('speed',si);};
+$('slider').oninput=e=>{pause();showFrame(+e.target.value);};
+window.addEventListener('resize',layoutScrub);
+
+let boltOn=store.get('on_bolt',true),boltLayer=L.layerGroup(),ws=null,strikes=[],wsRetry=0;boltLayer.addTo(map);
+function boltConnect(){if(!boltOn)return;const srv='wss://ws'+(1+Math.floor(Math.random()*8))+'.blitzortung.org/';try{ws=new WebSocket(srv);}catch(e){return schedBolt();}
+  ws.onopen=()=>{wsRetry=0;try{ws.send('{"a":111}');}catch(_){}};
+  ws.onmessage=ev=>{let d;try{d=JSON.parse(boDecode(ev.data));}catch(_){try{d=JSON.parse(ev.data);}catch(__){return;}}if(d&&d.lat&&d.lon)addStrike(+d.lat,+d.lon);};
+  ws.onclose=schedBolt;ws.onerror=()=>{try{ws.close();}catch(_){}};}
+function schedBolt(){if(!boltOn)return;wsRetry++;if(wsRetry>5)return;setTimeout(boltConnect,1400*wsRetry);}
+function boDecode(b){if(typeof b!=='string')return b;const e={};let d=b.split(''),c=d[0],f=c,g=[c],h=256,o=h;for(let i=1;i<d.length;i++){let n=d[i].charCodeAt(0);n=h>n?d[i]:(e[n]?e[n]:f+c);g.push(n);c=n.charAt(0);e[o]=f+c;o++;f=n;}return g.join('');}
+function addStrike(lat,lon){const now=Date.now();strikes.push({lat,lon,t:now});
+  const m=L.circleMarker([lat,lon],{pane:'bolt',radius:5,color:'#b8860b',weight:1.5,fillColor:'#ffd24d',fillOpacity:1});m._t=now;m.addTo(boltLayer);
+  const ring=L.circleMarker([lat,lon],{pane:'bolt',radius:4,color:'#f08020',weight:2,fillOpacity:0,opacity:.9}).addTo(boltLayer);
+  let rr=4;const gi=setInterval(()=>{rr+=4;ring.setRadius(rr);ring.setStyle({opacity:Math.max(0,.9-rr/45)});if(rr>45){clearInterval(gi);boltLayer.removeLayer(ring);}},38);updateBadges();}
+function ageStrikes(){const now=Date.now();boltLayer.eachLayer(l=>{if(l._t){const a=(now-l._t)/1000;if(a>1200)boltLayer.removeLayer(l);else{const f=1-a/1200;const c=a<120?'#e23b3b':a<480?'#f08020':'#f5c518';l.setStyle({fillColor:c,fillOpacity:f*.95,radius:5*f+1.5});}}});strikes=strikes.filter(s=>now-s.t<1200000);updateBadges();}
+setInterval(ageStrikes,3000);
+
+let cellsOn=store.get('on_cells',false),cellLayer=L.layerGroup(),cellHist=[];cellLayer.addTo(map);
+let knmiCellHist=[];
+async function loadCellsKNMI(){
+  if(!USE_KNMI)return;
+  try{
+    const r=await fetch(BACKEND+'/api/cells');const j=await r.json();
+    if(!cellsOn){return;}
+    cellLayer.clearLayers();
+    j.cells.forEach(c=>{
+      const col=c.max_dbz>55?'#e23b3b':c.max_dbz>48?'#f08020':'#2e9e5b';
+      L.circleMarker([c.lat,c.lon],{pane:'cells',radius:Math.min(7+c.size/40,22),color:col,weight:2.5,fillColor:col,fillOpacity:.12}).addTo(cellLayer);
+      // beweging: match met vorige set
+      let best=null,bd=1e9;knmiCellHist.forEach(h=>{const d=Math.hypot(h.lat-c.lat,h.lon-c.lon);if(d<bd&&d<.4){bd=d;best=h;}});
+      L.marker([c.lat,c.lon],{pane:'cells',icon:L.divIcon({className:'',html:`<div style="font:800 10px sans-serif;color:${col};white-space:nowrap;text-shadow:0 0 3px #fff,0 0 3px #fff">${Math.round(c.max_dbz)} dBZ</div>`,iconSize:[50,12]})}).addTo(cellLayer);
+      if(best){const dlat=c.lat-best.lat,dlon=c.lon-best.lon;const ex=[c.lat+dlat*6,c.lon+dlon*6];
+        L.polyline([[c.lat,c.lon],ex],{pane:'cells',color:col,weight:2.5,opacity:.85,dashArray:'3 5'}).addTo(cellLayer);}
+    });
+    knmiCellHist=j.cells.map(c=>({lat:c.lat,lon:c.lon}));
+  }catch(e){}
+}
+function detectCells(){
+  if(USE_KNMI){loadCellsKNMI();return;}
+  cellLayer.clearLayers();if(!cellsOn)return;
+  const recent=strikes.filter(s=>Date.now()-s.t<900000),grid={};
+  recent.forEach(s=>{const k=Math.round(s.lat*5)/5+'_'+Math.round(s.lon*5)/5;(grid[k]=grid[k]||[]).push(s);});
+  const cells=[];Object.values(grid).forEach(g=>{if(g.length<3)return;cells.push({lat:g.reduce((a,b)=>a+b.lat,0)/g.length,lon:g.reduce((a,b)=>a+b.lon,0)/g.length,n:g.length});});
+  cells.forEach(c=>{let best=null,bd=1e9;cellHist.forEach(h=>{const d=Math.hypot(h.lat-c.lat,h.lon-c.lon);if(d<bd&&d<.4){bd=d;best=h;}});
+    const col=c.n>15?'#e23b3b':c.n>7?'#f08020':'#2e9e5b';
+    L.circleMarker([c.lat,c.lon],{pane:'cells',radius:Math.min(8+c.n,22),color:col,weight:2.5,fillColor:col,fillOpacity:.12}).addTo(cellLayer);
+    if(best){const dlat=c.lat-best.lat,dlon=c.lon-best.lon;const spd=Math.hypot(dlat,dlon)*111/((Date.now()-best.ts)/3600000);const ex=[c.lat+dlat*6,c.lon+dlon*6];
+      L.polyline([[c.lat,c.lon],ex],{pane:'cells',color:col,weight:2.5,opacity:.85,dashArray:'3 5'}).addTo(cellLayer);
+      L.marker(ex,{pane:'cells',icon:L.divIcon({className:'',html:`<div style="font:800 10px sans-serif;color:${col};white-space:nowrap;text-shadow:0 0 3px #fff,0 0 3px #fff">▶ ${spd.toFixed(0)} km/u</div>`,iconSize:[60,12]})}).addTo(cellLayer);}
+    c.ts=Date.now();});
+  cellHist=cells;}
+setInterval(detectCells,8000);
+function updateBadges(){const recent=strikes.filter(s=>Date.now()-s.t<900000);const b=document.querySelector('[data-l=bolt]');let bd=b.querySelector('.badge');
+  if(recent.length>0){if(!bd){bd=document.createElement('span');bd.className='badge';b.appendChild(bd);}bd.textContent=recent.length>999?'999+':recent.length;}else if(bd)bd.remove();}
+
+let capeOn=store.get('on_cape',false),capeLayer=L.layerGroup();capeLayer.addTo(map);
+async function loadCape(){capeLayer.clearLayers();if(!capeOn)return;const b=map.getBounds(),pts=[],R=6;
+  for(let i=0;i<R;i++)for(let j=0;j<R;j++)pts.push([b.getSouth()+(b.getNorth()-b.getSouth())*i/(R-1),b.getWest()+(b.getEast()-b.getWest())*j/(R-1)]);
+  try{const u=`https://api.open-meteo.com/v1/forecast?latitude=${pts.map(p=>p[0].toFixed(2)).join(',')}&longitude=${pts.map(p=>p[1].toFixed(2)).join(',')}&current=cape&timezone=auto`;
+    const r=await fetch(u);const j=await r.json();const arr=Array.isArray(j)?j:[j];
+    const dlat=(b.getNorth()-b.getSouth())/(R-1)/2,dlon=(b.getEast()-b.getWest())/(R-1)/2;
+    arr.forEach((d,k)=>{const c=d.current&&d.current.cape!=null?d.current.cape:0;L.rectangle([[pts[k][0]-dlat,pts[k][1]-dlon],[pts[k][0]+dlat,pts[k][1]+dlon]],{pane:'cape',stroke:false,fillColor:capeColor(c),fillOpacity:c>100?.3:.05}).addTo(capeLayer);});
+  }catch(e){toast('CAPE-data niet beschikbaar');}}
+function capeColor(c){return c>2500?'#e23b3b':c>1500?'#f08020':c>800?'#f5c518':c>300?'#c3e84a':c>100?'#3fc97a':'#a8d5ff';}
+
+let satOn=store.get('on_sat',false),satLayer=null;
+function toggleSat(on){if(on){const t=frames[nowIdx]?frames[nowIdx].time:'';satLayer=L.tileLayer(`https://tilecache.rainviewer.com/v2/satellite/${t}/512/{z}/{x}/{y}/0/0_0.png`,{pane:'sat',opacity:.5,maxZoom:19}).addTo(map);}else if(satLayer){map.removeLayer(satLayer);satLayer=null;}}
+let hailOn=store.get('on_hail',false),hailLayer=L.layerGroup();hailLayer.addTo(map);
+async function loadHail(){hailLayer.clearLayers();if(!hailOn)return;const b=map.getBounds(),pts=[],R=5;
+  for(let i=0;i<R;i++)for(let j=0;j<R;j++)pts.push([b.getSouth()+(b.getNorth()-b.getSouth())*i/(R-1),b.getWest()+(b.getEast()-b.getWest())*j/(R-1)]);
+  try{const h=new Date().getHours();const u=`https://api.open-meteo.com/v1/forecast?latitude=${pts.map(p=>p[0].toFixed(2)).join(',')}&longitude=${pts.map(p=>p[1].toFixed(2)).join(',')}&current=cape&hourly=wind_speed_850hPa,wind_speed_500hPa&forecast_days=1&timezone=auto`;
+    const r=await fetch(u);const j=await r.json();const arr=Array.isArray(j)?j:[j];
+    const dlat=(b.getNorth()-b.getSouth())/(R-1)/2,dlon=(b.getEast()-b.getWest())/(R-1)/2;
+    arr.forEach((d,k)=>{const cape=d.current?.cape||0;const s8=d.hourly?.wind_speed_850hPa?.[h]||0,s5=d.hourly?.wind_speed_500hPa?.[h]||0;const proxy=cape*Math.abs(s5-s8)/1000;
+      if(proxy>4)L.rectangle([[pts[k][0]-dlat,pts[k][1]-dlon],[pts[k][0]+dlat,pts[k][1]+dlon]],{pane:'cape',stroke:true,color:'#0a4ea3',weight:1,fillColor:'#5badf0',fillOpacity:Math.min(.4,proxy/60)}).addTo(hailLayer);});
+  }catch(e){}}
+
+async function updateThreat(){const c=map.getCenter();
+  try{const h=new Date().getHours();const u=`https://api.open-meteo.com/v1/forecast?latitude=${c.lat.toFixed(2)}&longitude=${c.lng.toFixed(2)}&current=cape&hourly=cape,lifted_index,wind_speed_850hPa,wind_speed_500hPa,wind_direction_850hPa,wind_direction_500hPa&forecast_days=1&timezone=auto`;
+    const r=await fetch(u);const j=await r.json();
+    const cape=j.current?.cape??j.hourly?.cape?.[h]??0;const li=j.hourly?.lifted_index?.[h]??0;
+    const s8=j.hourly?.wind_speed_850hPa?.[h]??0,s5=j.hourly?.wind_speed_500hPa?.[h]??0;
+    const d8=(j.hourly?.wind_direction_850hPa?.[h]??0)*Math.PI/180,d5=(j.hourly?.wind_direction_500hPa?.[h]??0)*Math.PI/180;
+    const shear=Math.hypot(s5*Math.sin(d5)-s8*Math.sin(d8),s5*Math.cos(d5)-s8*Math.cos(d8))/1.852;
+    const hail=cape*shear/1000;renderThreat(cape,shear,hail,li);
+  }catch(e){$('cbTxt').firstChild.textContent='Geen data';}}
+function renderThreat(cape,shear,hail,li){
+  $('vCape').textContent=Math.round(cape)+' J/kg';$('vShear').textContent=Math.round(shear)+' kt';
+  $('vHail').textContent=hail>40?'Groot':hail>18?'Matig':hail>6?'Klein':'Geen';$('vLi').textContent=li.toFixed(1);
+  $('fCape').style.width=Math.min(100,cape/30)+'%';$('fCape').style.background=capeColor(cape);
+  $('fShear').style.width=Math.min(100,shear*2.2)+'%';$('fShear').style.background=shear>35?'#e23b3b':shear>20?'#f08020':'#2e9e5b';
+  $('fHail').style.width=Math.min(100,hail*2)+'%';$('fHail').style.background=hail>40?'#e23b3b':hail>18?'#f08020':'#2e9e5b';
+  const liN=Math.max(0,Math.min(100,(-li)*12));$('fLi').style.width=liN+'%';$('fLi').style.background=li<-6?'#e23b3b':li<-2?'#f08020':'#2e9e5b';
+  let sc=Math.min(4,cape/700)+Math.min(3.5,shear/12)+Math.min(2.5,hail/20);sc=Math.max(0,Math.min(10,sc));
+  let code,cls,txt;
+  if(sc>=7){code='ROOD';cls='rood';txt='Zware onweersdreiging';}
+  else if(sc>=5){code='ORANJE';cls='oranje';txt='Verhoogde onweerskans';}
+  else if(sc>=3){code='GEEL';cls='geel';txt='Mogelijk onweer';}
+  else{code='GROEN';cls='';txt='Rustig weerbeeld';}
+  $('cbBadge').textContent='CODE '+code;
+  $('codebanner').className='codebanner '+cls;
+  $('cbTxt').childNodes[0].nodeValue=txt;
+  $('cbSub').textContent=Math.round(cape)+' CAPE · '+Math.round(shear)+' kt shear · index '+sc.toFixed(1);
+  document.querySelector('[data-l=bolt]').classList.toggle('alarm',sc>=7&&boltOn);
+}
+
+let sheetOpen=false;
+$('codebanner').onclick=()=>{sheetOpen=!sheetOpen;$('sheet').classList.toggle('open',sheetOpen);
+  $('codebanner').querySelector('.chev').textContent=sheetOpen?'⌄':'›';const c=map.getCenter();$('shLoc').textContent=c.lat.toFixed(2)+'N '+c.lng.toFixed(2)+'E';};
+
+function syncChip(l,on){document.querySelector(`[data-l=${l}]`).classList.toggle('on',on);}
+['radar','bolt','cells','cape','sat','hail'].forEach(l=>{const on=store.get('on_'+l,l==='radar'||l==='bolt');syncChip(l,on);});
+document.querySelectorAll('.lchip').forEach(chip=>{let press=null;
+  chip.addEventListener('click',e=>{const l=chip.dataset.l;if(l==='radar'&&e.target.closest('.opacity-pop'))return;
+    const on=!chip.classList.contains('on');chip.classList.toggle('on',on);store.set('on_'+l,on);
+    if(l==='radar'){radarOn=on;showFrame(cur);}
+    if(l==='bolt'){boltOn=on;if(on){boltConnect();boltLayer.addTo(map);}else{boltLayer.clearLayers();if(ws)try{ws.close();}catch(_){}}}
+    if(l==='cells'){cellsOn=on;detectCells();if(on)toast(USE_KNMI?'Cellen uit KNMI-reflectiviteit + bewegingsvector':'Cellen uit bliksemclusters + bewegingsvector');}
+    if(l==='cape'){capeOn=on;loadCape();}
+    if(l==='sat'){satOn=on;toggleSat(on);}
+    if(l==='hail'){hailOn=on;loadHail();if(on)toast('Hagel-potentieel: CAPE × windschering');}});
+  if(chip.dataset.l==='radar'){
+    chip.addEventListener('touchstart',()=>{press=setTimeout(()=>{$('opPop').classList.add('show');},420);},{passive:true});
+    chip.addEventListener('touchend',()=>clearTimeout(press));
+    chip.addEventListener('dblclick',()=>$('opPop').classList.toggle('show'));}
+});
+$('opSlider').value=radarOpacity*100;
+$('opSlider').oninput=e=>{radarOpacity=+e.target.value/100;store.set('opacity',+e.target.value);if(radarOn)showFrame(cur);};
+document.addEventListener('click',e=>{if(!e.target.closest('[data-l=radar]'))$('opPop').classList.remove('show');});
+
+let me=null,following=false;
+$('locBtn').onclick=()=>{if(!navigator.geolocation){toast('Geen GPS op dit toestel');return;}following=!following;$('locBtn').classList.toggle('on',following);if(!following)return;
+  navigator.geolocation.watchPosition(p=>{const ll=[p.coords.latitude,p.coords.longitude];if(me)map.removeLayer(me);
+    me=L.circleMarker(ll,{pane:'cells',radius:8,color:'#fff',weight:3,fillColor:'#0a4ea3',fillOpacity:1}).addTo(map);
+    if(following&&!me._z){map.flyTo(ll,9,{duration:.8});me._z=true;}},
+    ()=>{toast('GPS geweigerd');following=false;$('locBtn').classList.remove('on');},{enableHighAccuracy:true,maximumAge:5000,timeout:9000});};
+
+let probeMarker=null,probeTimer=null;
+map.on('click',async e=>{
+  if(sheetOpen){sheetOpen=false;$('sheet').classList.remove('open');$('codebanner').querySelector('.chev').textContent='›';return;}
+  const{lat,lng}=e.latlng;if(probeMarker)map.removeLayer(probeMarker);
+  probeMarker=L.marker([lat,lng],{pane:'probe',icon:L.divIcon({className:'',html:'<div class="probedot"></div>',iconSize:[16,16]})}).addTo(map);
+  const pt=map.latLngToContainerPoint(e.latlng);const pb=$('probe');pb.style.left=pt.x+'px';pb.style.top=pt.y+'px';
+  $('pLL').textContent=lat.toFixed(3)+'N '+lng.toFixed(3)+'E';$('pDbz').textContent='…';$('pCape').textContent='…';pb.classList.add('show');
+  clearTimeout(probeTimer);probeTimer=setTimeout(()=>{pb.classList.remove('show');if(probeMarker)map.removeLayer(probeMarker);},6000);
+  try{const r=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(3)}&longitude=${lng.toFixed(3)}&current=cape,precipitation&timezone=auto`);const j=await r.json();
+    $('pCape').textContent=Math.round(j.current?.cape||0)+' J/kg';const pr=j.current?.precipitation||0;
+    $('pDbz').textContent=pr>0?(pr.toFixed(1)+' mm/u'):'droog';}catch(_){$('pDbz').textContent='–';$('pCape').textContent='–';}
+});
+
+$('searchBtn').onclick=()=>toast('Zoeken komt in de volgende versie — verschuif de kaart of gebruik GPS');
+
+$('driveBtn').onclick=()=>{document.body.classList.toggle('drive');const on=document.body.classList.contains('drive');$('driveBtn').classList.toggle('on',on);setTimeout(()=>{map.invalidateSize();layoutScrub();},340);};
+
+let moveT=null;
+map.on('moveend',()=>{store.set('view',{c:[map.getCenter().lat,map.getCenter().lng],z:map.getZoom()});clearTimeout(moveT);moveT=setTimeout(()=>{if(capeOn)loadCape();if(hailOn)loadHail();updateThreat();if(sheetOpen){const c=map.getCenter();$('shLoc').textContent=c.lat.toFixed(2)+'N '+c.lng.toFixed(2)+'E';}},700);});
+
+setInterval(async()=>{const wasNow=cur===nowIdx;const keepCur=cur;
+  try{Object.values(rLayers).forEach(l=>map.removeLayer(l));rLayers={};
+    await loadRadar();
+    if(!wasNow)showFrame(Math.min(keepCur,frames.length-1));
+  }catch(e){}},120000);
+setInterval(updateThreat,300000);
+
+(async function(){radarOn=store.get('on_radar',true);
+  try{await loadRadar();}catch(e){toast('Radar laden mislukt — controleer verbinding');}
+  if(boltOn)boltConnect();if(capeOn)loadCape();if(satOn)toggleSat(true);if(hailOn)loadHail();updateThreat();
+  setTimeout(()=>$('loader').classList.add('gone'),650);
+  if(!store.get('seen_hint',false)){setTimeout(()=>{$('hint').classList.add('show');setTimeout(()=>$('hint').classList.remove('show'),4500);store.set('seen_hint',true);},1400);}
+})();
+</script>
+</body>
+</html>
