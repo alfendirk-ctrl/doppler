@@ -303,8 +303,9 @@ async function loadRadarKNMI(){
 }
 function setExtents(){if(frames.length){$('tStart').textContent='-'+Math.round((frames[nowIdx].time-frames[0].time)/60)+'m';$('tEnd').textContent='+'+Math.round((frames[frames.length-1].time-frames[nowIdx].time)/60)+'m';}}
 
-/* RainViewer scheme 2 = light-friendly blue->red; works on light base */
-const rUrl=f=>`${host}${f.path}/512/{z}/{x}/{y}/2/1_1.png`;
+/* RainViewer 256px tiles, kleur 2 (universal), smooth=1 snow=0.
+   256-formaat voorkomt de "Zoom Level Not Supported" placeholder. */
+const rUrl=f=>`${host}${f.path}/256/{z}/{x}/{y}/2/1_0.png`;
 function rLayer(i){
   if(rLayers[i])return rLayers[i];
   let l;
@@ -314,7 +315,7 @@ function rLayer(i){
   }else{
     // RainViewer radar bestaat native tot ~zoom 10; maxNativeZoom laat Leaflet
     // lagere tiles opschalen i.p.v. "Zoom Level Not Supported" te tonen.
-    l=L.tileLayer(rUrl(frames[i]),{pane:'radar',opacity:0,maxZoom:19,maxNativeZoom:10,minNativeZoom:1,tileSize:256,crossOrigin:true});
+    l=L.tileLayer(rUrl(frames[i]),{pane:'radar',opacity:0,maxZoom:19,maxNativeZoom:12,tileSize:256,crossOrigin:true});
   }
   l.addTo(map);rLayers[i]=l;return l;
 }
