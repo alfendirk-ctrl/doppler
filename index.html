@@ -266,7 +266,8 @@ const USE_KNMI=BACKEND.length>0;
 const store={get(k,d){try{const v=JSON.parse(localStorage.getItem('dop_'+k));return v==null?d:v;}catch(e){return d;}},set(k,v){try{localStorage.setItem('dop_'+k,JSON.stringify(v));}catch(e){}}};
 
 const savedView=store.get('view',null);
-const map=L.map('map',{zoomControl:false,attributionControl:true,zoomSnap:.5,tap:false}).setView(savedView?savedView.c:HOME,savedView?savedView.z:7.5);
+const startZoom=savedView?Math.max(7,Math.min(11,savedView.z)):8.5;
+const map=L.map('map',{zoomControl:false,attributionControl:true,zoomSnap:.5,tap:false,minZoom:6}).setView(savedView?savedView.c:HOME,startZoom);
 /* KNMI uses a light/positron base map for calm, readable look */
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© OSM © CARTO · RainViewer · Blitzortung · Open-Meteo'}).addTo(map);
 ['cape','sat','radar','bolt','cells','probe','labels'].forEach((p,i)=>{map.createPane(p);map.getPane(p).style.zIndex=400+i*30;});
@@ -311,7 +312,9 @@ function rLayer(i){
     const f=frames[i];const b=f.bounds; // [S,W,N,E]
     l=L.imageOverlay(BACKEND+'/api/radar/'+f.id+'.png',[[b[0],b[1]],[b[2],b[3]]],{pane:'radar',opacity:0,crossOrigin:true});
   }else{
-    l=L.tileLayer(rUrl(frames[i]),{pane:'radar',opacity:0,maxZoom:19,crossOrigin:true});
+    // RainViewer radar bestaat native tot ~zoom 10; maxNativeZoom laat Leaflet
+    // lagere tiles opschalen i.p.v. "Zoom Level Not Supported" te tonen.
+    l=L.tileLayer(rUrl(frames[i]),{pane:'radar',opacity:0,maxZoom:19,maxNativeZoom:10,minNativeZoom:1,tileSize:256,crossOrigin:true});
   }
   l.addTo(map);rLayers[i]=l;return l;
 }
