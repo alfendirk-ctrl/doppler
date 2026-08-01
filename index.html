@@ -258,7 +258,7 @@ const $=id=>document.getElementById(id);
 const HOME=[51.886,5.434];
 /* ============================================================
    BACKEND — vul hier je Railway-URL in voor KNMI hoge-res radar.
-   Leeg laten = automatisch RainViewer (werkt meteen, lager detail).
+   Leeg laten = KNMI WMS hoge-res radar direct (geen backend nodig).
    Voorbeeld: const BACKEND="https://doppler-backend.up.railway.app";
    ============================================================ */
 const BACKEND="";
@@ -269,7 +269,7 @@ const savedView=store.get('view',null);
 const startZoom=savedView?Math.max(7,Math.min(11,savedView.z)):8.5;
 const map=L.map('map',{zoomControl:false,attributionControl:true,zoomSnap:.5,tap:false,minZoom:6}).setView(savedView?savedView.c:HOME,startZoom);
 /* KNMI uses a light/positron base map for calm, readable look */
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© OSM © CARTO · RainViewer · Blitzortung · Open-Meteo'}).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© OSM © CARTO · KNMI radar · Blitzortung · Open-Meteo'}).addTo(map);
 ['cape','sat','radar','bolt','cells','probe','labels'].forEach((p,i)=>{map.createPane(p);map.getPane(p).style.zIndex=400+i*30;});
 map.getPane('labels').style.pointerEvents='none';map.getPane('labels').style.zIndex=650;
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png',{maxZoom:19,pane:'labels'}).addTo(map);
@@ -280,18 +280,29 @@ const PLAY='<path d="M8 5v14l11-7z"/>',PAUSE='<path d="M7 5h4v14H7zM13 5h4v14h-4
 
 let host='',frames=[],nowIdx=0,cur=0,rLayers={},radarOpacity=store.get('opacity',82)/100,radarOn=store.get('on_radar',true);
 
+/* KNMI WMS endpoints (anoniem, geen key nodig) */
+const KNMI_WMS='https://anonymous.api.dataplatform.knmi.nl/wms/adaguc-server?DATASET=radar_reflectivity_composites';
+const KNMI_WMS_FC='https://anonymous.api.dataplatform.knmi.nl/wms/adaguc-server?DATASET=radar_forecast';
+
 async function loadRadar(){
-  if(USE_KNMI){return loadRadarKNMI();}
-  return loadRadarRainViewer();
+  if(USE_KNMI){return loadRadarBackend();}
+  return loadRadarWMS();
 }
-async function loadRadarRainViewer(){
-  const r=await fetch('https://api.rainviewer.com/public/weather-maps.json');const j=await r.json();host=j.host;
-  const past=(j.radar.past||[]).map(f=>({type:'past',time:f.time,path:f.path}));
-  const nc=(j.radar.nowcast||[]).map(f=>({type:'nc',time:f.time,path:f.path}));
-  frames=[...past,...nc];nowIdx=past.length-1;cur=nowIdx;$('slider').max=frames.length-1;$('slider').value=cur;
+/* Primaire bron: KNMI WMS hoge-res radar. Bouwt frames op 5-min stappen.
+   Verleden: laatste 12 frames (=60 min). Nowcast: +5..+60 via radar_forecast. */
+async function loadRadarWMS(){
+  const now=Date.now();
+  // rond af op vorige 5-min slot (UTC)
+  const slot=5*60*1000;
+  const base=Math.floor(now/slot)*slot - slot; // 1 stap terug (data-latentie)
+  frames=[];
+  for(let i=11;i>=0;i--){frames.push({type:'past',time:Math.floor((base-i*slot)/1000),wms:'past'});}
+  nowIdx=frames.length-1;
+  for(let i=1;i<=12;i++){frames.push({type:'nc',time:Math.floor((base+i*slot)/1000),wms:'fc'});}
+  cur=nowIdx;$('slider').max=frames.length-1;$('slider').value=cur;
   setExtents();layoutScrub();showFrame(cur);
 }
-async function loadRadarKNMI(){
+async function loadRadarBackend(){
   const r=await fetch(BACKEND+'/api/frames');
   if(!r.ok)throw new Error('backend frames '+r.status);
   const j=await r.json();
@@ -303,19 +314,26 @@ async function loadRadarKNMI(){
 }
 function setExtents(){if(frames.length){$('tStart').textContent='-'+Math.round((frames[nowIdx].time-frames[0].time)/60)+'m';$('tEnd').textContent='+'+Math.round((frames[frames.length-1].time-frames[nowIdx].time)/60)+'m';}}
 
-/* RainViewer 256px tiles, kleur 2 (universal), smooth=1 snow=0.
-   256-formaat voorkomt de "Zoom Level Not Supported" placeholder. */
-const rUrl=f=>`${host}${f.path}/256/{z}/{x}/{y}/2/1_0.png`;
+function wmsTimeISO(epoch){return new Date(epoch*1000).toISOString().split('.')[0]+'Z';}
 function rLayer(i){
   if(rLayers[i])return rLayers[i];
   let l;
   if(USE_KNMI){
-    const f=frames[i];const b=f.bounds; // [S,W,N,E]
+    const f=frames[i];const b=f.bounds;
     l=L.imageOverlay(BACKEND+'/api/radar/'+f.id+'.png',[[b[0],b[1]],[b[2],b[3]]],{pane:'radar',opacity:0,crossOrigin:true});
   }else{
-    // RainViewer radar bestaat native tot ~zoom 10; maxNativeZoom laat Leaflet
-    // lagere tiles opschalen i.p.v. "Zoom Level Not Supported" te tonen.
-    l=L.tileLayer(rUrl(frames[i]),{pane:'radar',opacity:0,maxZoom:19,maxNativeZoom:12,tileSize:256,crossOrigin:true});
+    // KNMI WMS — geverifieerde laag 'Reflectivity' (dBZ), transparante stijl.
+    const f=frames[i];
+    const url=f.wms==='fc'?KNMI_WMS_FC:KNMI_WMS;
+    const opts={
+      layers:'Reflectivity',styles:'radarReflectivity_transparant/nearest',
+      format:'image/png',transparent:true,version:'1.3.0',pane:'radar',opacity:0,
+      crossOrigin:true,tileSize:512,updateWhenIdle:true
+    };
+    // 'nu'-frame: geen TIME -> server geeft nieuwste. Andere frames: expliciete TIME.
+    if(i!==nowIdx)opts.time=wmsTimeISO(f.time);
+    l=L.tileLayer.wms(url+'&',opts);
+    l.on('tileerror',()=>{}); // stille fout bij out-of-range TIME
   }
   l.addTo(map);rLayers[i]=l;return l;
 }
