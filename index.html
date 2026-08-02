@@ -288,17 +288,14 @@ async function loadRadar(){
   if(USE_KNMI){return loadRadarBackend();}
   return loadRadarWMS();
 }
-/* Primaire bron: KNMI WMS hoge-res radar. Bouwt frames op 5-min stappen.
-   Verleden: laatste 12 frames (=60 min). Nowcast: +5..+60 via radar_forecast. */
+/* Primaire bron: KNMI WMS hoge-res radar. Eén laag, TIME-animatie.
+   Alleen verleden (stabiel). 8 frames van 5 min = 40 min historie. */
 async function loadRadarWMS(){
-  const now=Date.now();
-  // rond af op vorige 5-min slot (UTC)
   const slot=5*60*1000;
-  const base=Math.floor(now/slot)*slot - slot; // 1 stap terug (data-latentie)
+  const base=Math.floor(Date.now()/slot)*slot - slot; // 1 stap terug (latentie)
   frames=[];
-  for(let i=11;i>=0;i--){frames.push({type:'past',time:Math.floor((base-i*slot)/1000),wms:'past'});}
+  for(let i=7;i>=0;i--){frames.push({type:'past',time:Math.floor((base-i*slot)/1000),wms:'past'});}
   nowIdx=frames.length-1;
-  for(let i=1;i<=12;i++){frames.push({type:'nc',time:Math.floor((base+i*slot)/1000),wms:'fc'});}
   cur=nowIdx;$('slider').max=frames.length-1;$('slider').value=cur;
   setExtents();layoutScrub();showFrame(cur);
 }
@@ -315,46 +312,62 @@ async function loadRadarBackend(){
 function setExtents(){if(frames.length){$('tStart').textContent='-'+Math.round((frames[nowIdx].time-frames[0].time)/60)+'m';$('tEnd').textContent='+'+Math.round((frames[frames.length-1].time-frames[nowIdx].time)/60)+'m';}}
 
 function wmsTimeISO(epoch){return new Date(epoch*1000).toISOString().split('.')[0]+'Z';}
-function rLayer(i){
+
+/* Eén herbruikte WMS-laag (geheugenvriendelijk) i.p.v. 24 losse lagen. */
+let wmsLayer=null;
+function ensureWMS(){
+  if(wmsLayer)return wmsLayer;
+  wmsLayer=L.tileLayer.wms(KNMI_WMS+'&',{
+    layers:'Reflectivity',styles:'radarReflectivity_transparant/nearest',
+    format:'image/png',transparent:true,version:'1.3.0',pane:'radar',
+    opacity:0,crossOrigin:true,tileSize:256,updateWhenIdle:true,updateWhenZooming:false,keepBuffer:0
+  });
+  wmsLayer.on('tileerror',()=>{});
+  wmsLayer.addTo(map);
+  return wmsLayer;
+}
+
+function rLayer(i){ // alleen voor backend-modus (per-frame overlay)
   if(rLayers[i])return rLayers[i];
-  let l;
-  if(USE_KNMI){
-    const f=frames[i];const b=f.bounds;
-    l=L.imageOverlay(BACKEND+'/api/radar/'+f.id+'.png',[[b[0],b[1]],[b[2],b[3]]],{pane:'radar',opacity:0,crossOrigin:true});
-  }else{
-    // KNMI WMS — geverifieerde laag 'Reflectivity' (dBZ), transparante stijl.
-    const f=frames[i];
-    const url=f.wms==='fc'?KNMI_WMS_FC:KNMI_WMS;
-    const opts={
-      layers:'Reflectivity',styles:'radarReflectivity_transparant/nearest',
-      format:'image/png',transparent:true,version:'1.3.0',pane:'radar',opacity:0,
-      crossOrigin:true,tileSize:512,updateWhenIdle:true
-    };
-    // 'nu'-frame: geen TIME -> server geeft nieuwste. Andere frames: expliciete TIME.
-    if(i!==nowIdx)opts.time=wmsTimeISO(f.time);
-    l=L.tileLayer.wms(url+'&',opts);
-    l.on('tileerror',()=>{}); // stille fout bij out-of-range TIME
-  }
+  const f=frames[i];const b=f.bounds;
+  const l=L.imageOverlay(BACKEND+'/api/radar/'+f.id+'.png',[[b[0],b[1]],[b[2],b[3]]],{pane:'radar',opacity:0,crossOrigin:true});
   l.addTo(map);rLayers[i]=l;return l;
 }
 let pre=null;
 function showFrame(i){
-  if(!frames.length)return;cur=i;const l=rLayer(i);
-  Object.keys(rLayers).forEach(k=>{if(+k!==i)rLayers[k].setOpacity(0);});
-  l.setOpacity(radarOn?radarOpacity:0);
+  if(!frames.length)return;cur=i;
+  if(USE_KNMI){
+    // backend: per-frame overlays met opacity-swap
+    const l=rLayer(i);
+    Object.keys(rLayers).forEach(k=>{if(+k!==i)rLayers[k].setOpacity(0);});
+    l.setOpacity(radarOn?radarOpacity:0);
+  }else{
+    // WMS: hergebruik één laag, wissel alleen TIME
+    const w=ensureWMS();
+    const f=frames[i];
+    const params={};
+    params.time = (i===nowIdx)?null:wmsTimeISO(f.time);
+    // ADAGUC accepteert TIME=null niet; gebruik nieuwste door param te verwijderen
+    if(params.time===null){ if(w.wmsParams.time){delete w.wmsParams.time;} }
+    else { w.wmsParams.time=params.time; }
+    w.setParams(w.wmsParams);
+    w.setOpacity(radarOn?radarOpacity:0);
+  }
   const d=new Date(frames[i].time*1000);$('clk').textContent=d.toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'});
   const st=$('st'),tx=$('sttx');
   if(frames[i].type==='nc'){const m=Math.round((frames[i].time-frames[nowIdx].time)/60);st.className='st fc';tx.innerHTML='Verwachting · <b>+'+m+' min</b>';}
   else if(i===nowIdx){st.className='st live';tx.innerHTML='<b>Live</b> · nu';}
   else{const m=Math.round((frames[nowIdx].time-frames[i].time)/60);st.className='st';tx.textContent='−'+m+' min';}
-  $('slider').value=i;positionThumb();clearTimeout(pre);pre=setTimeout(()=>{if(frames[i+1])rLayer(i+1);},110);
+  $('slider').value=i;positionThumb();
 }
 function positionThumb(){const max=+$('slider').max||1;$('thumb').style.left=(3+(cur/max)*($('scrub').clientWidth-6))+'px';}
 function layoutScrub(){const max=frames.length-1||1;const pct=nowIdx/max*100;$('past').style.width=pct+'%';$('nowln').style.left=pct+'%';$('fcz').style.left=pct+'%';$('fcz').style.width=(100-pct)+'%';positionThumb();}
 
 let playing=false,timer=null,speeds=[1,2,4],si=store.get('speed',1);$('spdBtn').textContent=speeds[si]+'×';
 function step(){let n=cur+1;if(n>=frames.length)n=0;showFrame(n);}
-function play(){playing=true;$('playIcon').innerHTML=PAUSE;const base=460;const t=()=>{step();const d=cur===frames.length-1?base*2.6/speeds[si]:base/speeds[si];timer=setTimeout(t,d);};t();}
+function play(){playing=true;$('playIcon').innerHTML=PAUSE;
+  const base=USE_KNMI?460:820; // WMS trager -> meer tijd per frame
+  const t=()=>{step();const d=cur===frames.length-1?base*2.6/speeds[si]:base/speeds[si];timer=setTimeout(t,d);};t();}
 function pause(){playing=false;$('playIcon').innerHTML=PLAY;clearTimeout(timer);}
 $('playBtn').onclick=()=>playing?pause():play();
 $('spdBtn').onclick=()=>{si=(si+1)%speeds.length;$('spdBtn').textContent=speeds[si]+'×';store.set('speed',si);};
@@ -516,7 +529,9 @@ let moveT=null;
 map.on('moveend',()=>{store.set('view',{c:[map.getCenter().lat,map.getCenter().lng],z:map.getZoom()});clearTimeout(moveT);moveT=setTimeout(()=>{if(capeOn)loadCape();if(hailOn)loadHail();updateThreat();if(sheetOpen){const c=map.getCenter();$('shLoc').textContent=c.lat.toFixed(2)+'N '+c.lng.toFixed(2)+'E';}},700);});
 
 setInterval(async()=>{const wasNow=cur===nowIdx;const keepCur=cur;
-  try{Object.values(rLayers).forEach(l=>map.removeLayer(l));rLayers={};
+  try{
+    if(USE_KNMI){Object.values(rLayers).forEach(l=>map.removeLayer(l));rLayers={};}
+    // WMS: wmsLayer blijft bestaan, alleen frames-tijden herberekenen
     await loadRadar();
     if(!wasNow)showFrame(Math.min(keepCur,frames.length-1));
   }catch(e){}},120000);
