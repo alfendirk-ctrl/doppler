@@ -269,7 +269,7 @@ const savedView=store.get('view',null);
 const startZoom=savedView?Math.max(7,Math.min(11,savedView.z)):8.5;
 const map=L.map('map',{zoomControl:false,attributionControl:true,zoomSnap:.5,tap:false,minZoom:6}).setView(savedView?savedView.c:HOME,startZoom);
 /* KNMI uses a light/positron base map for calm, readable look */
-L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© OSM © CARTO · KNMI radar · Blitzortung · Open-Meteo'}).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© OSM © CARTO · KNMI · NASA GIBS · Blitzortung · Open-Meteo'}).addTo(map);
 ['cape','sat','radar','bolt','cells','probe','labels'].forEach((p,i)=>{map.createPane(p);map.getPane(p).style.zIndex=400+i*30;});
 map.getPane('labels').style.pointerEvents='none';map.getPane('labels').style.zIndex=650;
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png',{maxZoom:19,pane:'labels'}).addTo(map);
@@ -437,7 +437,18 @@ async function loadCape(){capeLayer.clearLayers();if(!capeOn)return;const b=map.
 function capeColor(c){return c>2500?'#e23b3b':c>1500?'#f08020':c>800?'#f5c518':c>300?'#c3e84a':c>100?'#3fc97a':'#a8d5ff';}
 
 let satOn=store.get('on_sat',false),satLayer=null;
-function toggleSat(on){if(on){const t=frames[nowIdx]?frames[nowIdx].time:'';satLayer=L.tileLayer(`https://tilecache.rainviewer.com/v2/satellite/${t}/512/{z}/{x}/{y}/0/0_0.png`,{pane:'sat',opacity:.5,maxZoom:19}).addTo(map);}else if(satLayer){map.removeLayer(satLayer);satLayer=null;}}
+function toggleSat(on){
+  if(on){
+    // NASA GIBS — wereldwijde satelliet (VIIRS true color), werkt op alle zoomniveaus, geen key.
+    const d=new Date(Date.now()-2*24*3600*1000).toISOString().split('T')[0]; // 2 dagen terug (zekere dekking)
+    satLayer=L.tileLayer(
+      `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/${d}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
+      {pane:'sat',opacity:.6,maxZoom:19,maxNativeZoom:9,tileSize:256,crossOrigin:true}
+    );
+    satLayer.on('tileerror',()=>{});
+    satLayer.addTo(map);
+  }else if(satLayer){map.removeLayer(satLayer);satLayer=null;}
+}
 let hailOn=store.get('on_hail',false),hailLayer=L.layerGroup();hailLayer.addTo(map);
 async function loadHail(){hailLayer.clearLayers();if(!hailOn)return;const b=map.getBounds(),pts=[],R=5;
   for(let i=0;i<R;i++)for(let j=0;j<R;j++)pts.push([b.getSouth()+(b.getNorth()-b.getSouth())*i/(R-1),b.getWest()+(b.getEast()-b.getWest())*j/(R-1)]);
