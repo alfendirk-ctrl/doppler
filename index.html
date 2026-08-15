@@ -265,8 +265,12 @@ const BACKEND="";
 const USE_KNMI=BACKEND.length>0;
 const store={get(k,d){try{const v=JSON.parse(localStorage.getItem('dop_'+k));return v==null?d:v;}catch(e){return d;}},set(k,v){try{localStorage.setItem('dop_'+k,JSON.stringify(v));}catch(e){}}};
 
-const savedView=store.get('view',null);
-const startZoom=savedView?Math.max(7,Math.min(11,savedView.z)):8.5;
+let savedView=store.get('view',null);
+// veiligheidsklep: onbruikbare opgeslagen positie -> terug naar Tiel
+if(savedView&&(!Array.isArray(savedView.c)||savedView.c.length!==2||
+   typeof savedView.c[0]!=='number'||isNaN(savedView.c[0])||
+   typeof savedView.c[1]!=='number'||isNaN(savedView.c[1]))){savedView=null;}
+const startZoom=savedView&&typeof savedView.z==='number'?Math.max(7,Math.min(11,savedView.z)):8.5;
 const map=L.map('map',{zoomControl:false,attributionControl:true,zoomSnap:.5,tap:false,minZoom:6}).setView(savedView?savedView.c:HOME,startZoom);
 /* KNMI uses a light/positron base map for calm, readable look */
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',{maxZoom:19,attribution:'© OSM © CARTO · KNMI · NASA GIBS · Blitzortung · Open-Meteo'}).addTo(map);
@@ -436,14 +440,14 @@ async function loadCape(){capeLayer.clearLayers();if(!capeOn)return;const b=map.
   }catch(e){toast('CAPE-data niet beschikbaar');}}
 function capeColor(c){return c>2500?'#e23b3b':c>1500?'#f08020':c>800?'#f5c518':c>300?'#c3e84a':c>100?'#3fc97a':'#a8d5ff';}
 
-let satOn=store.get('on_sat',false),satLayer=null;
+let satOn=false,satLayer=null; // niet automatisch herstellen (voorkomt zwart scherm bij laadfout)
 function toggleSat(on){
   if(on){
     // NASA GIBS — wereldwijde satelliet (VIIRS true color), werkt op alle zoomniveaus, geen key.
-    const d=new Date(Date.now()-2*24*3600*1000).toISOString().split('T')[0]; // 2 dagen terug (zekere dekking)
+    const d=new Date(Date.now()-2*24*3600*1000).toISOString().split('T')[0];
     satLayer=L.tileLayer(
       `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/${d}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
-      {pane:'sat',opacity:.6,maxZoom:19,maxNativeZoom:9,tileSize:256,crossOrigin:true}
+      {pane:'sat',opacity:.45,maxZoom:19,maxNativeZoom:9,tileSize:256,crossOrigin:true}
     );
     satLayer.on('tileerror',()=>{});
     satLayer.addTo(map);
@@ -493,7 +497,8 @@ $('codebanner').onclick=()=>{sheetOpen=!sheetOpen;$('sheet').classList.toggle('o
   $('codebanner').querySelector('.chev').textContent=sheetOpen?'⌄':'›';const c=map.getCenter();$('shLoc').textContent=c.lat.toFixed(2)+'N '+c.lng.toFixed(2)+'E';};
 
 function syncChip(l,on){document.querySelector(`[data-l=${l}]`).classList.toggle('on',on);}
-['radar','bolt','cells','cape','sat','hail'].forEach(l=>{const on=store.get('on_'+l,l==='radar'||l==='bolt');syncChip(l,on);});
+['radar','bolt','cells','cape','hail'].forEach(l=>{const on=store.get('on_'+l,l==='radar'||l==='bolt');syncChip(l,on);});
+syncChip('sat',false);
 document.querySelectorAll('.lchip').forEach(chip=>{let press=null;
   chip.addEventListener('click',e=>{const l=chip.dataset.l;if(l==='radar'&&e.target.closest('.opacity-pop'))return;
     const on=!chip.classList.contains('on');chip.classList.toggle('on',on);store.set('on_'+l,on);
@@ -550,7 +555,7 @@ setInterval(updateThreat,300000);
 
 (async function(){radarOn=store.get('on_radar',true);
   try{await loadRadar();}catch(e){toast('Radar laden mislukt — controleer verbinding');}
-  if(boltOn)boltConnect();if(capeOn)loadCape();if(satOn)toggleSat(true);if(hailOn)loadHail();updateThreat();
+  if(boltOn)boltConnect();if(capeOn)loadCape();if(hailOn)loadHail();updateThreat();
   setTimeout(()=>$('loader').classList.add('gone'),650);
   if(!store.get('seen_hint',false)){setTimeout(()=>{$('hint').classList.add('show');setTimeout(()=>$('hint').classList.remove('show'),4500);store.set('seen_hint',true);},1400);}
 })();
