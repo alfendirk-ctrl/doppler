@@ -427,6 +427,7 @@ function resetBuffer(){
     :{url:wmsUrl(i,v),bounds:v.bounds,state:'idle',obj:null});
   // oude blobs pas loslaten als ze zeker niet meer in beeld staan
   setTimeout(()=>old.forEach(b=>{if(b.obj&&b.obj.indexOf('blob:')===0)URL.revokeObjectURL(b.obj);}),4000);
+  radarErrShown=false;
   paintBuffered();pump(g);
 }
 /* Haal frames op als blob, het frame in beeld eerst, dan de buren.
@@ -446,7 +447,13 @@ function pump(g){
     const ok=()=>{if(g!==bufGen)return;b.state='ready';paintBuffered();
       if(i===cur)showRadarFrame(i);pump(g);};
     fetch(b.url,{mode:'cors'})
-      .then(r=>r.ok?r.blob():Promise.reject(new Error(r.status)))
+      .then(r=>{
+        // ADAGUC antwoordt op een fout met een XML-exception en tóch status 200;
+        // zonder deze controle wordt dat een leeg beeld dat op 'droog' lijkt
+        const ct=r.headers.get('content-type')||'';
+        if(!r.ok||ct.indexOf('image')<0)return Promise.reject(new Error(r.status+' '+ct));
+        return r.blob();
+      })
       .then(bl=>{if(g!==bufGen)return;b.obj=URL.createObjectURL(bl);ok();})
       .catch(()=>{
         if(g!==bufGen)return;
@@ -455,12 +462,21 @@ function pump(g){
            zodat het afspelen niet alsnog op lege beelden gaat lopen. */
         const im=new Image();
         im.onload=()=>{if(g!==bufGen)return;b.obj=b.url;ok();};
-        im.onerror=()=>{if(g!==bufGen)return;b.state='error';paintBuffered();pump(g);};
+        im.onerror=()=>{if(g!==bufGen)return;b.state='error';paintBuffered();noteRadarError();pump(g);};
         im.src=b.url;
       });
   }
 }
 function bufReady(i){return buf[i]&&buf[i].state==='ready';}
+/* Komt er van geen enkel frame een bruikbaar beeld, dan is dat een storing
+   aan de bron — niet 'het regent niet'. Dat verschil moet je kunnen zien. */
+let radarErrShown=false;
+function noteRadarError(){
+  if(radarErrShown||!buf.length)return;
+  if(buf.some(b=>b.state!=='error'))return;
+  radarErrShown=true;
+  toast('Radarbeelden komen niet binnen — KNMI-bron reageert niet zoals verwacht',6000);
+}
 
 function ensureOverlays(bounds){
   if(ovA)return;
@@ -485,8 +501,15 @@ function showRadarFrame(i,onShown){
     ovFront=1-ovFront;
     if(onShown)onShown();
   };
+  // Een beeld dat niet decodeert is géén 'droog' beeld: laat het vorige
+  // frame staan, markeer het als fout en meld het, i.p.v. stil leeg tonen.
+  const fail=()=>{
+    if(fired||tok!==swapTok)return;
+    fired=true;b.state='error';paintBuffered();noteRadarError();
+    if(onShown)onShown();
+  };
   back.off('load');back.off('error');
-  back.once('load',done);back.once('error',done);
+  back.once('load',done);back.once('error',fail);
   setTimeout(done,3000);        // noodrem: nooit blijven hangen op één beeld
   back.setBounds(b.bounds);
   back.setUrl(b.obj||b.url);
@@ -515,7 +538,8 @@ function showFrame(i,onShown){
   if(frames[i].type==='nc'){const m=Math.round((frames[i].time-frames[nowIdx].time)/60);st.className='st fc';tx.innerHTML='Verwachting · <b>+'+m+' min</b>';}
   else if(i===nowIdx){st.className='st live';tx.innerHTML='<b>Live</b> · nu';}
   else{const m=Math.round((frames[nowIdx].time-frames[i].time)/60);st.className='st';tx.textContent='−'+m+' min';}
-  if(!bufReady(i))tx.innerHTML+=' <span class="ld">· laden…</span>';
+  if(buf[i]&&buf[i].state==='error')tx.innerHTML+=' <span class="ld">· geen beeld</span>';
+  else if(!bufReady(i))tx.innerHTML+=' <span class="ld">· laden…</span>';
   $('slider').value=i;positionThumb();
   return shown;
 }
@@ -734,12 +758,29 @@ $('opSlider').value=radarOpacity*100;
 $('opSlider').oninput=e=>{radarOpacity=+e.target.value/100;store.set('opacity',+e.target.value);applyRadarOpacity();};
 document.addEventListener('click',e=>{if(!e.target.closest('[data-l=radar]'))$('opPop').classList.remove('show');});
 
-let me=null,following=false;
-$('locBtn').onclick=()=>{if(!navigator.geolocation){toast('Geen GPS op dit toestel');return;}following=!following;$('locBtn').classList.toggle('on',following);if(!following)return;
-  navigator.geolocation.watchPosition(p=>{const ll=[p.coords.latitude,p.coords.longitude];if(me)map.removeLayer(me);
-    me=L.circleMarker(ll,{pane:'cells',radius:8,color:'#fff',weight:3,fillColor:'#0a4ea3',fillOpacity:1}).addTo(map);
-    if(following&&!me._z){map.flyTo(ll,9,{duration:.8});me._z=true;}},
-    ()=>{toast('GPS geweigerd');following=false;$('locBtn').classList.remove('on');},{enableHighAccuracy:true,maximumAge:5000,timeout:9000});};
+/* Eén keer naar je positie vliegen bij aanzetten, daarna alleen de stip
+   verplaatsen. De vlag hoorde niet op de marker te staan: die wordt bij
+   elke positie-update vervangen, waardoor hij bleef terugzoomen zodra je
+   zelf uitzoomde. En de watch werd nooit gestopt, dus er stapelden er
+   meerdere op elkaar. */
+let me=null,following=false,didCenter=false,watchId=null;
+$('locBtn').onclick=()=>{
+  if(!navigator.geolocation){toast('Geen GPS op dit toestel');return;}
+  following=!following;$('locBtn').classList.toggle('on',following);
+  if(!following){
+    if(watchId!=null){navigator.geolocation.clearWatch(watchId);watchId=null;}
+    if(me){map.removeLayer(me);me=null;}
+    didCenter=false;return;
+  }
+  if(watchId!=null)navigator.geolocation.clearWatch(watchId);
+  watchId=navigator.geolocation.watchPosition(p=>{
+    const ll=[p.coords.latitude,p.coords.longitude];
+    if(me)me.setLatLng(ll);
+    else me=L.circleMarker(ll,{pane:'cells',radius:8,color:'#fff',weight:3,fillColor:'#0a4ea3',fillOpacity:1}).addTo(map);
+    if(!didCenter){didCenter=true;map.flyTo(ll,9,{duration:.8});}},
+    ()=>{toast('GPS geweigerd');following=false;$('locBtn').classList.remove('on');
+      if(watchId!=null){navigator.geolocation.clearWatch(watchId);watchId=null;}},
+    {enableHighAccuracy:true,maximumAge:5000,timeout:9000});};
 
 let probeMarker=null,probeTimer=null;
 map.on('click',async e=>{

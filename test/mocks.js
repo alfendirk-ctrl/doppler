@@ -101,8 +101,13 @@ async function install(page, opts = {}) {
   });
 
   // basemap + labels: pale land tile, instant
-  await page.route('**basemaps.cartocdn.com/**', route =>
-    route.fulfill({ contentType: 'image/png', body: route.request().url().includes('labels') ? BLANK : LAND }));
+  await page.route('**basemaps.cartocdn.com/**', route => {
+    // het zoomniveau uit het tegelpad loggen, zodat een test kan zien
+    // of de kaart uit zichzelf terugzoomt
+    const m = route.request().url().match(/\/(\d+)\/\d+\/\d+/);
+    if (m) log.push({ kind: 'basemap', z: +m[1], ts: Date.now() });
+    return route.fulfill({ contentType: 'image/png', body: route.request().url().includes('labels') ? BLANK : LAND });
+  });
 
   // NASA GIBS satellite
   await page.route('**/gibs.earthdata.nasa.gov/**', route =>
@@ -119,6 +124,17 @@ async function install(page, opts = {}) {
     if (opts.noCors && ['fetch', 'xhr'].includes(route.request().resourceType())) {
       log.push({ kind: 'wms-corsblocked', ts: Date.now() });
       return route.abort('failed');
+    }
+    // BADLAYER=1 simulates ADAGUC answering a bad LAYERS/STYLES with an XML
+    // ServiceException at HTTP 200 — the failure mode that looks like "dry".
+    if (opts.badLayer) {
+      log.push({ kind: 'wms-exception', ts: Date.now() });
+      await sleep(latency);
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/xml',
+        body: '<?xml version="1.0"?><ServiceExceptionReport><ServiceException code="LayerNotDefined">Layer not defined</ServiceException></ServiceExceptionReport>',
+      });
     }
     const t = q('TIME') || 'now';
     const w = Math.min(1200, +q('WIDTH') || 256);

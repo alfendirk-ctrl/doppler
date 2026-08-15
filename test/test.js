@@ -11,7 +11,40 @@ const OUT = __dirname;
 const PROBE = `
 window.__ev = [];
 window.__t0 = Date.now();
+/* Nagebootste GPS die blijft doortikken, zoals tijdens het rijden.
+   Playwright's setGeolocation vuurt watchPosition niet opnieuw af, en juist
+   de herhaalde update is waar de app de mist in ging. */
+window.__geoCalls = 0;
+window.__watches = {};
+(() => {
+  let id = 0, step = 0;
+  const pos = () => ({ coords: {
+    latitude: 51.886 + step * 0.012, longitude: 5.434 + step * 0.012, accuracy: 12 } });
+  navigator.geolocation.watchPosition = (ok) => {
+    const wid = ++id;
+    setTimeout(() => { window.__geoCalls++; ok(pos()); }, 80);
+    window.__watches[wid] = setInterval(() => {
+      step++; window.__geoCalls++; ok(pos());
+    }, 600);
+    return wid;
+  };
+  navigator.geolocation.clearWatch = (wid) => {
+    clearInterval(window.__watches[wid]); delete window.__watches[wid];
+  };
+})();
 addEventListener('DOMContentLoaded', () => {
+  /* Tel hoe vaak de kaart een zoomanimatie begint. De oude GPS-code riep
+     flyTo bij elke positie-update opnieuw aan; die animatie rondde daardoor
+     nooit af, dus moveend vuurde niet en het opgeslagen zoomniveau bleef
+     staan terwijl de kaart zichtbaar bleef terugspringen. */
+  window.__zoomAnims = 0;
+  const mapEl = document.getElementById('map');
+  let wasAnim = false;
+  new MutationObserver(() => {
+    const isAnim = mapEl.classList.contains('leaflet-zoom-anim');
+    if (isAnim && !wasAnim) window.__zoomAnims++;
+    wasAnim = isAnim;
+  }).observe(mapEl, { attributes: true, attributeFilter: ['class'] });
   // 1. wrap showFrame (classic-script function declaration => on window)
   const iv = setInterval(() => {
     if (typeof window.showFrame !== 'function') return;
@@ -42,6 +75,15 @@ addEventListener('DOMContentLoaded', () => {
 });
 `;
 
+// Het echte zoomniveau, zoals de app het bij elke moveend zelf wegschrijft.
+// Via basemap-verzoeken meten werkt niet: Leaflet hergebruikt die tegels,
+// dus een terugsprong naar een eerder zoomniveau kost geen enkel verzoek.
+function mapZoom(page) {
+  return page.evaluate(() => {
+    try { return JSON.parse(localStorage.getItem('dop_view')).z; } catch (e) { return null; }
+  });
+}
+
 (async () => {
   const browser = await chromium.launch({ args: ['--no-sandbox'] });
   const ctx = await browser.newContext({
@@ -49,6 +91,8 @@ addEventListener('DOMContentLoaded', () => {
     deviceScaleFactor: 2,
     isMobile: true,
     hasTouch: true,
+    permissions: ['geolocation'],
+    geolocation: { latitude: 51.886, longitude: 5.434 },
     userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
   });
   const page = await ctx.newPage();
@@ -63,6 +107,7 @@ addEventListener('DOMContentLoaded', () => {
     log: netlog,
     tileLatency: +(process.env.LAT || 550),
     noCors: process.env.NOCORS === '1',
+    badLayer: process.env.BADLAYER === '1',
   });
   await page.addInitScript(PROBE);
 
@@ -136,9 +181,46 @@ addEventListener('DOMContentLoaded', () => {
   const blobs = await page.evaluate(() =>
     ({ overlaySrcs: [...document.querySelectorAll('.leaflet-radar-pane img')].map(i => i.src.slice(0, 5)) }));
 
+  // ---- GPS: één keer centreren, daarna je zoom met rust laten ------------
+  await page.click('#locBtn');
+  await page.waitForTimeout(2200);
+  const zAfterLock = await mapZoom(page);
+
+  // gebruiker zoomt zelf uit terwijl de positie blijft binnenkomen
+  await page.evaluate(() => document.getElementById('map').focus());
+  await page.keyboard.press('Minus');
+  await page.keyboard.press('Minus');
+  await page.waitForTimeout(1500);
+  const zAfterZoomOut = await mapZoom(page);
+  /* Terwijl er posities blijven binnenkomen mag de kaart niet uit zichzelf
+     bewegen. flyTo verandert de transform van de map-pane, dus die 3 seconden
+     lang bemonsteren is het directe signaal — betrouwbaarder dan moveend,
+     want een steeds opnieuw gestarte flyTo rondt nooit af en meldt dus niks. */
+  const paneSamples = await page.evaluate(() => new Promise(res => {
+    const el = document.querySelector('.leaflet-map-pane');
+    const seen = new Set(); let n = 0;
+    const iv = setInterval(() => {
+      seen.add(el.style.transform || '');
+      if (++n >= 30) { clearInterval(iv); res(seen.size); }
+    }, 100);
+  }));
+  const zAfterMoving = await mapZoom(page);
+  const animsWhileMoving = paneSamples - 1;   // 0 = kaart stond stil
+
+  // uit- en weer aanzetten mag geen tweede watcher achterlaten
+  await page.click('#locBtn');
+  await page.waitForTimeout(400);
+  const watchesAfterOff = await page.evaluate(() => Object.keys(window.__watches).length);
+  await page.click('#locBtn');
+  await page.waitForTimeout(1200);
+  const watchesAfterOn = await page.evaluate(() => Object.keys(window.__watches).length);
+  const geoCalls = await page.evaluate(() => window.__geoCalls);
+
   const state = await page.evaluate(() => ({
     clk: document.getElementById('clk').textContent,
     status: document.getElementById('sttx').textContent,
+    toast: document.getElementById('toast').textContent,
+    readyFrames: document.querySelectorAll('#bufsegs i').length,
     code: document.getElementById('cbBadge').textContent,
     sub: document.getElementById('cbSub').textContent,
     cape: document.getElementById('vCape').textContent,
@@ -189,6 +271,20 @@ addEventListener('DOMContentLoaded', () => {
       panRefetch: afterPan - beforePan,        // verwacht: 1 per frame
       scrubRefetch: afterScrub - beforeScrub,  // verwacht: 0
       overlaySrcScheme: blobs.overlaySrcs,     // verwacht: blob:
+    },
+    gps: {
+      zoomNaVergrendelen: zAfterLock,   // verwacht: 9, één keer centreren
+      zoomNaUitzoomen: zAfterZoomOut,   // verwacht: lager dan 9
+      zoomNaVerplaatsen: zAfterMoving,  // verwacht: gelijk aan zoomNaUitzoomen
+      gpsUpdates: geoCalls,
+      zelfBewegenTijdensRijden: animsWhileMoving,  // verwacht: 0
+      watchersNaUit: watchesAfterOff,   // verwacht: 0
+      watchersNaWeerAan: watchesAfterOn, // verwacht: 1
+      // met de oude code kwam de kaart na vergrendelen nooit tot rust op 9:
+      // flyTo werd elke positie-update opnieuw gestart
+      komtTotRust: zAfterLock === 9,
+      houdtZoomVast: animsWhileMoving === 0 && zAfterMoving === zAfterZoomOut,
+      geenWatcherLek: watchesAfterOff === 0 && watchesAfterOn === 1,
     },
   };
   fs.writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2));
