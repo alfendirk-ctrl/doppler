@@ -125,13 +125,22 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font
 .tk .fcz{position:absolute;top:0;bottom:0;right:0;border-radius:3px;
   background:repeating-linear-gradient(90deg,rgba(10,78,163,.25) 0 4px,transparent 4px 9px)}
 .tk .nowln{position:absolute;top:-5px;bottom:-5px;width:2.5px;background:var(--knmi);border-radius:2px}
+/* ingeladen frames, zoals de bufferbalk van een videospeler */
+.tk .bufsegs{position:absolute;inset:0;border-radius:3px;overflow:hidden;pointer-events:none}
+.tk .bufsegs i{position:absolute;top:0;bottom:0;background:var(--knmi-light);opacity:.32;
+  transition:opacity .25s}
+.tinfo .st .ld{opacity:.55;font-weight:600}
 .thumb{position:absolute;top:16px;width:21px;height:21px;border-radius:50%;transform:translate(-50%,-50%);
   background:#fff;border:3px solid var(--knmi);box-shadow:0 2px 8px rgba(10,78,163,.4);pointer-events:none}
 .scrub input{position:absolute;inset:-8px 0;width:100%;height:calc(100% + 16px);margin:0;opacity:0;cursor:pointer}
 .tlabels{display:flex;justify-content:space-between;font-size:9.5px;font-weight:600;color:var(--ink-faint);padding:0 3px;margin-bottom:8px}
 .tlabels .now{color:var(--knmi)}
 
-.layerbar{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;padding:6px 1px 1px;margin:0 -2px}
+/* de balk scrollt; de fade rechts laat zien dat er meer is */
+.layerbar{display:flex;gap:9px;overflow-x:auto;scrollbar-width:none;padding:8px 14px 1px 6px;margin:0 -6px;
+  -webkit-overflow-scrolling:touch;
+  -webkit-mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 26px),transparent 100%);
+  mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 26px),transparent 100%)}
 .layerbar::-webkit-scrollbar{display:none}
 .lchip{flex:none;min-width:60px;height:50px;border:1px solid var(--line);border-radius:14px;background:var(--surface-2);
   color:var(--ink-soft);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
@@ -143,10 +152,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font
 .lchip .badge{position:absolute;top:-6px;right:-4px;background:var(--rood);color:#fff;font-size:9px;font-weight:800;
   padding:1px 5px;border-radius:8px;border:2px solid var(--surface);font-family:var(--mono)}
 .lchip.on .badge{border-color:var(--knmi)}
-/* info-bolletje op elke laag-chip */
-.lchip .qm{position:absolute;top:-5px;left:-5px;width:19px;height:19px;border-radius:50%;
-  background:var(--surface);border:1.5px solid var(--line-bold);color:var(--ink-soft);
-  font-size:11px;font-weight:800;display:grid;place-items:center;line-height:1;z-index:2}
+/* info-bolletje op elke laag-chip — klein en rustig, tikbaar gebied is groter */
+.lchip .qm{position:absolute;top:-4px;left:-4px;width:16px;height:16px;border-radius:50%;
+  background:var(--surface);border:1px solid var(--line-bold);color:var(--ink-faint);
+  font-size:10px;font-weight:800;display:grid;place-items:center;line-height:1;z-index:2}
+.lchip .qm::after{content:'';position:absolute;inset:-8px}
 .lchip.on .qm{background:#fff;border-color:#fff;color:var(--knmi)}
 
 /* uitlegkaart */
@@ -175,12 +185,13 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font
 .opacity-pop .lab{font-size:10px;font-weight:700;color:var(--ink-soft);white-space:nowrap}
 .opacity-pop input{width:120px;accent-color:var(--knmi)}
 
-/* legend strip */
-.legend{display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
-.legend .cap{font-size:9.5px;font-weight:700;color:var(--ink-faint);flex:none}
-.gbar{flex:1;height:7px;border-radius:4px;
+/* legend strip — grid houdt de schaalwoorden exact onder de kleurbalk */
+.legend{display:grid;grid-template-columns:auto 1fr;align-items:center;column-gap:8px;row-gap:3px;
+  margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+.legend .cap{font-size:9.5px;font-weight:700;color:var(--ink-faint)}
+.gbar{height:7px;border-radius:4px;
   background:linear-gradient(90deg,#a8d5ff 0%,#5badf0 18%,#3fc97a 36%,#c3e84a 52%,#f5d020 66%,#f08020 80%,#e23b3b 92%,#b832d0 100%)}
-.gsc{display:flex;justify-content:space-between;font-size:8px;font-weight:600;color:var(--ink-faint);margin-top:2px;padding:0 1px}
+.gsc{grid-column:2;display:flex;justify-content:space-between;font-size:8px;font-weight:600;color:var(--ink-faint)}
 
 /* DRIVE mode */
 body.drive .codebanner,body.drive .searchbtn,body.drive .legend{display:none}
@@ -188,7 +199,12 @@ body.drive .tinfo .clk{font-size:40px}
 body.drive .tinfo .st{font-size:14px}
 body.drive .play{width:66px;height:66px}
 body.drive .spd{width:60px;height:60px;font-size:17px}
-body.drive .layerbar{display:none}
+/* lagen blijven bereikbaar tijdens het rijden, maar groter en zonder
+   de '?'-bolletjes — anders kun je een laag die je scherm vult niet uitzetten */
+body.drive .lchip{min-width:76px;height:62px}
+body.drive .lchip svg{width:22px;height:22px}
+body.drive .lchip .t{font-size:10px}
+body.drive .lchip .qm{display:none}
 body.drive .scrub{height:56px}
 body.drive .thumb{width:32px;height:32px}
 
@@ -253,7 +269,7 @@ body.drive .thumb{width:32px;height:32px}
       <button class="spd" id="spdBtn">2×</button>
     </div>
     <div class="scrub" id="scrub">
-      <div class="tk"><div class="past" id="past"></div><div class="fcz" id="fcz"></div><div class="nowln" id="nowln"></div></div>
+      <div class="tk"><div class="past" id="past"></div><div class="fcz" id="fcz"></div><div class="bufsegs" id="bufsegs"></div><div class="nowln" id="nowln"></div></div>
       <div class="thumb" id="thumb"></div>
       <input type="range" id="slider" min="0" max="0" value="0" step="1" aria-label="tijdlijn">
     </div>
@@ -269,8 +285,8 @@ body.drive .thumb{width:32px;height:32px}
     </div>
     <div class="legend">
       <span class="cap">Neerslag</span><div class="gbar"></div>
+      <div class="gsc"><span>licht</span><span>matig</span><span>zwaar</span><span>extreem</span></div>
     </div>
-    <div class="gsc"><span>licht</span><span>matig</span><span>zwaar</span><span>extreem</span></div>
   </div>
 </div>
 
@@ -319,7 +335,7 @@ function toast(m,ms){const t=$('toast');t.textContent=m;t.classList.add('show');
 
 const PLAY='<path d="M8 5v14l11-7z"/>',PAUSE='<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>';
 
-let host='',frames=[],nowIdx=0,cur=0,rLayers={},radarOpacity=store.get('opacity',82)/100,radarOn=store.get('on_radar',true);
+let host='',frames=[],nowIdx=0,cur=0,radarOpacity=store.get('opacity',82)/100,radarOn=store.get('on_radar',true);
 
 /* KNMI WMS endpoints (anoniem, geen key nodig) */
 const KNMI_WMS='https://anonymous.api.dataplatform.knmi.nl/wms/adaguc-server?DATASET=radar_reflectivity_composites';
@@ -340,7 +356,7 @@ async function loadRadarWMS(){
   nowIdx=frames.length-1;
   for(let i=1;i<=6;i++){frames.push({type:'nc',time:Math.floor((base+i*step*slot)/1000)});}
   cur=nowIdx;$('slider').max=frames.length-1;$('slider').value=cur;
-  setExtents();layoutScrub();showFrame(cur);
+  setExtents();layoutScrub();resetBuffer();showFrame(cur);
 }
 async function loadRadarBackend(){
   const r=await fetch(BACKEND+'/api/frames');
@@ -349,84 +365,185 @@ async function loadRadarBackend(){
   frames=j.frames.map(f=>({type:f.type==='nowcast'?'nc':'past',time:f.time,id:f.id,bounds:f.bounds}));
   nowIdx=frames.map(f=>f.type).lastIndexOf('past');if(nowIdx<0)nowIdx=frames.length-1;
   cur=nowIdx;$('slider').max=frames.length-1;$('slider').value=cur;
-  setExtents();layoutScrub();showFrame(cur);
+  setExtents();layoutScrub();resetBuffer();showFrame(cur);
   loadCellsKNMI();
 }
 function setExtents(){if(frames.length){$('tStart').textContent='-'+Math.round((frames[nowIdx].time-frames[0].time)/60)+'m';$('tEnd').textContent='+'+Math.round((frames[frames.length-1].time-frames[nowIdx].time)/60)+'m';}}
 
 function wmsTimeISO(epoch){return new Date(epoch*1000).toISOString().split('.')[0]+'Z';}
 
-/* Double-buffering: twee WMS-lagen wisselen elkaar af.
-   Verleden en nowcast zijn aparte datasets, dus elke buffer krijgt de juiste URL.
-   Stijl '/shaded' = vloeiend geïnterpoleerd i.p.v. blokkerig. */
-const WMS_BASE={format:'image/png',transparent:true,version:'1.3.0',pane:'radar',
-  opacity:0,crossOrigin:true,tileSize:256,updateWhenIdle:false,keepBuffer:1};
-let wmsA=null,wmsB=null,activeBuf=0;
-function makeWMS(){
-  const l=L.tileLayer.wms(KNMI_WMS+'&',Object.assign({},WMS_BASE,
-    {layers:'precipitation',styles:'precip-smooth-white-to-purple/bilinear'}));
-  l.on('tileerror',()=>{});
-  l.addTo(map);return l;
-}
-function ensureBuffers(){if(!wmsA){wmsA=makeWMS();wmsB=makeWMS();}}
+/* ============================================================
+   RADAR-ENGINE — één beeld per frame, vooraf ingeladen.
 
-/* zet buffer op het juiste frame: kiest dataset + laag + tijd.
-   Beide gladde stijlen (bilinear/shaded) i.p.v. blokkerig 'nearest'. */
-function setWMSFrame(layer,i){
-  const f=frames[i];
-  const isFc=f.type==='nc';
-  layer._url=(isFc?KNMI_WMS_FC:KNMI_WMS)+'&';
-  const p=Object.assign({},layer.wmsParams);
-  p.layers = isFc?'precipitation_nowcast':'precipitation';
-  p.styles = isFc?'rainrate-blue-to-purple/shaded':'precip-smooth-white-to-purple/bilinear';
-  if(i===nowIdx){delete p.time;}else{p.time=wmsTimeISO(f.time);}
-  layer.wmsParams=p;layer.setParams(p);
+   Voorheen: ~13 WMS-tegels per frame, pas opgehaald op het moment
+   dat het frame in beeld moest. Daardoor liep het beeld seconden
+   achter op de klok en werd de helft van de frames overgeslagen.
+
+   Nu: één GetMap over de hele viewport per frame, alle frames
+   vooraf ingeladen, en twee hergebruikte imageOverlays die elkaar
+   afwisselen. Nooit meer dan twee <img> op de kaart — dat was de
+   oorzaak van de eerdere Safari-crash.
+   ============================================================ */
+const RES_CAP=1000;   // max pixels per zijde van één radarbeeld
+const PAD=0.12;       // marge rond de viewport: klein pannen herlaadt niets
+const CONC=3;         // gelijktijdige downloads
+const FRAME_MS=500;   // basistempo per frame op 1×
+const BLANK_PNG='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+let ovA=null,ovB=null,ovFront=0,swapTok=0;
+let buf=[],bufGen=0,viewKey='',waiting=false;
+
+/* huidige viewport -> bbox in web-mercator + beeldformaat.
+   We vragen EPSG:3857 op zodat het beeld exact past op wat Leaflet
+   tekent: imageOverlay rekt lineair in geprojecteerde ruimte. */
+function computeView(){
+  const b=map.getBounds().pad(PAD),s=map.getSize(),f=1+2*PAD;
+  const q=Math.min(1,RES_CAP/Math.max(s.x*f,s.y*f));
+  const w=Math.max(160,Math.round(s.x*f*q)),h=Math.max(160,Math.round(s.y*f*q));
+  const sw=map.options.crs.project(b.getSouthWest()),ne=map.options.crs.project(b.getNorthEast());
+  return {bbox:[sw.x,sw.y,ne.x,ne.y],w:w,h:h,bounds:b,
+    key:[Math.round(sw.x),Math.round(sw.y),Math.round(ne.x),Math.round(ne.y),w,h].join('_')};
 }
-let swapPending=null;
-function showWMSFrame(i){
-  ensureBuffers();
-  const front=activeBuf===0?wmsA:wmsB;
-  const back =activeBuf===0?wmsB:wmsA;
-  setWMSFrame(back,i);
-  const op=radarOn?radarOpacity:0;
-  clearTimeout(swapPending);
-  const doSwap=()=>{back.setOpacity(op);front.setOpacity(0);activeBuf=1-activeBuf;};
-  back.once('load',doSwap);
-  swapPending=setTimeout(doSwap,900);
+function wmsUrl(i,v){
+  const f=frames[i],isFc=f.type==='nc';
+  const p=new URLSearchParams({SERVICE:'WMS',VERSION:'1.3.0',REQUEST:'GetMap',
+    LAYERS:isFc?'precipitation_nowcast':'precipitation',
+    STYLES:isFc?'rainrate-blue-to-purple/shaded':'precip-smooth-white-to-purple/bilinear',
+    CRS:'EPSG:3857',BBOX:v.bbox.join(','),WIDTH:v.w,HEIGHT:v.h,
+    FORMAT:'image/png',TRANSPARENT:'TRUE'});
+  if(i!==nowIdx)p.set('TIME',wmsTimeISO(f.time));
+  return (isFc?KNMI_WMS_FC:KNMI_WMS)+'&'+p.toString();
 }
 
-function rLayer(i){ // alleen voor backend-modus (per-frame overlay)
-  if(rLayers[i])return rLayers[i];
-  const f=frames[i];const b=f.bounds;
-  const l=L.imageOverlay(BACKEND+'/api/radar/'+f.id+'.png',[[b[0],b[1]],[b[2],b[3]]],{pane:'radar',opacity:0,crossOrigin:true});
-  l.addTo(map);rLayers[i]=l;return l;
+/* bouw de bufferlijst opnieuw: na nieuwe frames of na verschuiven van de kaart */
+function resetBuffer(){
+  const g=++bufGen;
+  const old=buf;
+  const v=USE_KNMI?null:computeView();
+  if(v)viewKey=v.key;
+  buf=frames.map((f,i)=>USE_KNMI
+    ?{url:BACKEND+'/api/radar/'+f.id+'.png',
+      bounds:L.latLngBounds([f.bounds[0],f.bounds[1]],[f.bounds[2],f.bounds[3]]),state:'idle',obj:null}
+    :{url:wmsUrl(i,v),bounds:v.bounds,state:'idle',obj:null});
+  // oude blobs pas loslaten als ze zeker niet meer in beeld staan
+  setTimeout(()=>old.forEach(b=>{if(b.obj&&b.obj.indexOf('blob:')===0)URL.revokeObjectURL(b.obj);}),4000);
+  paintBuffered();pump(g);
 }
-let pre=null;
-function showFrame(i){
-  if(!frames.length)return;cur=i;
-  if(USE_KNMI){
-    const l=rLayer(i);
-    Object.keys(rLayers).forEach(k=>{if(+k!==i)rLayers[k].setOpacity(0);});
-    l.setOpacity(radarOn?radarOpacity:0);
-  }else{
-    showWMSFrame(i);
+/* Haal frames op als blob, het frame in beeld eerst, dan de buren.
+   Een blob-URL toont gegarandeerd zonder netwerkverkeer — leunen op de
+   HTTP-cache is te wankel. En blobs blijven ingepakt in het geheugen
+   (~100 kB per frame i.p.v. ~2 MB gedecodeerd), dus dit is meteen
+   veiliger voor Safari. */
+function pump(g){
+  if(g!==bufGen)return;
+  let active=buf.filter(b=>b.state==='loading').length;
+  const order=buf.map((b,i)=>i).sort((a,b)=>Math.abs(a-cur)-Math.abs(b-cur));
+  for(let k=0;k<order.length;k++){
+    if(active>=CONC)break;
+    const i=order[k],b=buf[i];
+    if(b.state!=='idle')continue;
+    b.state='loading';active++;
+    const ok=()=>{if(g!==bufGen)return;b.state='ready';paintBuffered();
+      if(i===cur)showRadarFrame(i);pump(g);};
+    fetch(b.url,{mode:'cors'})
+      .then(r=>r.ok?r.blob():Promise.reject(new Error(r.status)))
+      .then(bl=>{if(g!==bufGen)return;b.obj=URL.createObjectURL(bl);ok();})
+      .catch(()=>{
+        if(g!==bufGen)return;
+        /* Geen CORS beschikbaar: val terug op een gewone Image. Trager,
+           maar het frame geldt pas als klaar wanneer het echt geladen is,
+           zodat het afspelen niet alsnog op lege beelden gaat lopen. */
+        const im=new Image();
+        im.onload=()=>{if(g!==bufGen)return;b.obj=b.url;ok();};
+        im.onerror=()=>{if(g!==bufGen)return;b.state='error';paintBuffered();pump(g);};
+        im.src=b.url;
+      });
   }
+}
+function bufReady(i){return buf[i]&&buf[i].state==='ready';}
+
+function ensureOverlays(bounds){
+  if(ovA)return;
+  ovA=L.imageOverlay(BLANK_PNG,bounds,{pane:'radar',opacity:0,interactive:false}).addTo(map);
+  ovB=L.imageOverlay(BLANK_PNG,bounds,{pane:'radar',opacity:0,interactive:false}).addTo(map);
+}
+/* Wisselt naar frame i. Elke wissel krijgt een token: als er intussen
+   een nieuwere wissel is gestart, doet de oude niets meer. Dat was
+   precies de bug — opgestapelde load-handlers lieten activeBuf twee
+   keer omklappen, waarna de zichtbare laag werd leeggegooid. */
+function showRadarFrame(i,onShown){
+  const b=buf[i];if(!b||b.state!=='ready')return false;
+  ensureOverlays(b.bounds);
+  const front=ovFront===0?ovA:ovB,back=ovFront===0?ovB:ovA;
+  const tok=++swapTok;
+  let fired=false;
+  const done=()=>{
+    if(fired||tok!==swapTok)return;
+    fired=true;
+    back.setOpacity(radarOn?radarOpacity:0);
+    front.setOpacity(0);
+    ovFront=1-ovFront;
+    if(onShown)onShown();
+  };
+  back.off('load');back.off('error');
+  back.once('load',done);back.once('error',done);
+  setTimeout(done,3000);        // noodrem: nooit blijven hangen op één beeld
+  back.setBounds(b.bounds);
+  back.setUrl(b.obj||b.url);
+  return true;
+}
+function applyRadarOpacity(){
+  if(!ovA)return;
+  const front=ovFront===0?ovA:ovB,back=ovFront===0?ovB:ovA;
+  front.setOpacity(radarOn?radarOpacity:0);back.setOpacity(0);
+}
+/* gevulde stukken van de tijdlijn tonen, zoals een videospeler */
+function paintBuffered(){
+  const el=$('bufsegs');if(!el)return;
+  if(!frames.length){el.innerHTML='';return;}
+  const n=frames.length,m=n-1||1,w=100/n;
+  el.innerHTML=buf.map((b,i)=>b.state==='ready'
+    ?'<i style="left:'+Math.max(0,Math.min(100-w,(i/m)*100-w/2)).toFixed(2)+'%;width:'+w.toFixed(2)+'%"></i>'
+    :'').join('');
+}
+
+function showFrame(i,onShown){
+  if(!frames.length)return false;cur=i;
+  const shown=showRadarFrame(i,onShown);pump(bufGen);
   const d=new Date(frames[i].time*1000);$('clk').textContent=d.toLocaleTimeString('nl-NL',{hour:'2-digit',minute:'2-digit'});
   const st=$('st'),tx=$('sttx');
   if(frames[i].type==='nc'){const m=Math.round((frames[i].time-frames[nowIdx].time)/60);st.className='st fc';tx.innerHTML='Verwachting · <b>+'+m+' min</b>';}
   else if(i===nowIdx){st.className='st live';tx.innerHTML='<b>Live</b> · nu';}
   else{const m=Math.round((frames[nowIdx].time-frames[i].time)/60);st.className='st';tx.textContent='−'+m+' min';}
+  if(!bufReady(i))tx.innerHTML+=' <span class="ld">· laden…</span>';
   $('slider').value=i;positionThumb();
+  return shown;
 }
 function positionThumb(){const max=+$('slider').max||1;$('thumb').style.left=(3+(cur/max)*($('scrub').clientWidth-6))+'px';}
 function layoutScrub(){const max=frames.length-1||1;const pct=nowIdx/max*100;$('past').style.width=pct+'%';$('nowln').style.left=pct+'%';$('fcz').style.left=pct+'%';$('fcz').style.width=(100-pct)+'%';positionThumb();}
 
 let playing=false,timer=null,speeds=[1,2,4],si=store.get('speed',1);$('spdBtn').textContent=speeds[si]+'×';
-function step(){let n=cur+1;if(n>=frames.length)n=0;showFrame(n);}
-function play(){playing=true;$('playIcon').innerHTML=PAUSE;
-  const base=USE_KNMI?460:700; // double-buffered WMS: vlotter dan voorheen
-  const t=()=>{step();const d=cur===frames.length-1?base*2.6/speeds[si]:base/speeds[si];timer=setTimeout(t,d);};t();}
-function pause(){playing=false;$('playIcon').innerHTML=PLAY;clearTimeout(timer);}
+/* Speelt alleen frames af die al ingeladen zijn. Is het volgende frame
+   er nog niet, dan wachten we even i.p.v. de klok te laten doorlopen
+   op een beeld dat niet klopt. */
+function tick(){
+  if(!playing)return;
+  let n=cur+1;if(n>=frames.length)n=0;
+  const b=buf[n];
+  if(b&&b.state==='idle')pump(bufGen);
+  if(b&&b.state==='loading'){
+    if(!waiting){waiting=true;$('st').className='st';$('sttx').innerHTML='<b>Bufferen</b> · even geduld';}
+    timer=setTimeout(tick,120);return;
+  }
+  waiting=false;
+  const d=(n===frames.length-1?FRAME_MS*2.4:FRAME_MS)/speeds[si],t0=Date.now();
+  // volgende stap pas inplannen als dit beeld écht staat: dan loopt de klok
+  // nooit voor op wat je ziet, ook niet als het netwerk tegenzit
+  const next=()=>{if(playing)timer=setTimeout(tick,Math.max(40,d-(Date.now()-t0)));};
+  if(!showFrame(n,next))timer=setTimeout(tick,d);
+}
+function play(){playing=true;$('playIcon').innerHTML=PAUSE;tick();}
+function pause(){playing=false;waiting=false;$('playIcon').innerHTML=PLAY;clearTimeout(timer);}
 $('playBtn').onclick=()=>playing?pause():play();
 $('spdBtn').onclick=()=>{si=(si+1)%speeds.length;$('spdBtn').textContent=speeds[si]+'×';store.set('speed',si);};
 $('slider').oninput=e=>{pause();showFrame(+e.target.value);};
@@ -602,9 +719,7 @@ syncChip('sat',false);
 document.querySelectorAll('.lchip').forEach(chip=>{let press=null;
   chip.addEventListener('click',e=>{const l=chip.dataset.l;if(l==='radar'&&e.target.closest('.opacity-pop'))return;
     const on=!chip.classList.contains('on');chip.classList.toggle('on',on);store.set('on_'+l,on);
-    if(l==='radar'){radarOn=on;
-      if(!on&&wmsA){wmsA.setOpacity(0);wmsB.setOpacity(0);}
-      showFrame(cur);}
+    if(l==='radar'){radarOn=on;applyRadarOpacity();}
     if(l==='bolt'){boltOn=on;if(on){boltConnect();boltLayer.addTo(map);}else{boltLayer.clearLayers();if(ws)try{ws.close();}catch(_){}}}
     if(l==='cells'){cellsOn=on;detectCells();if(on)toast(USE_KNMI?'Cellen uit KNMI-reflectiviteit + bewegingsvector':'Cellen uit bliksemclusters + bewegingsvector');}
     if(l==='cape'){capeOn=on;loadCape();}
@@ -616,7 +731,7 @@ document.querySelectorAll('.lchip').forEach(chip=>{let press=null;
     chip.addEventListener('dblclick',()=>$('opPop').classList.toggle('show'));}
 });
 $('opSlider').value=radarOpacity*100;
-$('opSlider').oninput=e=>{radarOpacity=+e.target.value/100;store.set('opacity',+e.target.value);if(radarOn)showFrame(cur);};
+$('opSlider').oninput=e=>{radarOpacity=+e.target.value/100;store.set('opacity',+e.target.value);applyRadarOpacity();};
 document.addEventListener('click',e=>{if(!e.target.closest('[data-l=radar]'))$('opPop').classList.remove('show');});
 
 let me=null,following=false;
@@ -644,12 +759,14 @@ $('searchBtn').onclick=()=>toast('Zoeken komt in de volgende versie — verschui
 $('driveBtn').onclick=()=>{document.body.classList.toggle('drive');const on=document.body.classList.contains('drive');$('driveBtn').classList.toggle('on',on);setTimeout(()=>{map.invalidateSize();layoutScrub();},340);};
 
 let moveT=null;
-map.on('moveend',()=>{store.set('view',{c:[map.getCenter().lat,map.getCenter().lng],z:map.getZoom()});clearTimeout(moveT);moveT=setTimeout(()=>{if(capeOn)loadCape();if(hailOn)loadHail();updateThreat();if(sheetOpen){const c=map.getCenter();$('shLoc').textContent=c.lat.toFixed(2)+'N '+c.lng.toFixed(2)+'E';}},700);});
+map.on('moveend',()=>{store.set('view',{c:[map.getCenter().lat,map.getCenter().lng],z:map.getZoom()});clearTimeout(moveT);moveT=setTimeout(()=>{
+    // verschoven of gezoomd: de radarbeelden gelden voor de oude viewport
+    if(!USE_KNMI&&frames.length&&computeView().key!==viewKey){resetBuffer();showFrame(cur);}
+    if(capeOn)loadCape();if(hailOn)loadHail();updateThreat();if(sheetOpen){const c=map.getCenter();$('shLoc').textContent=c.lat.toFixed(2)+'N '+c.lng.toFixed(2)+'E';}},700);});
 
 setInterval(async()=>{const wasNow=cur===nowIdx;const keepCur=cur;
   try{
-    if(USE_KNMI){Object.values(rLayers).forEach(l=>map.removeLayer(l));rLayers={};}
-    // WMS: wmsLayer blijft bestaan, alleen frames-tijden herberekenen
+    // frames-tijden herberekenen; resetBuffer() laadt de nieuwe beelden in
     await loadRadar();
     if(!wasNow)showFrame(Math.min(keepCur,frames.length-1));
   }catch(e){}},120000);
