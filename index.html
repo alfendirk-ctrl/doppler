@@ -323,7 +323,7 @@ let host='',frames=[],nowIdx=0,cur=0,rLayers={},radarOpacity=store.get('opacity'
 
 /* KNMI WMS endpoints (anoniem, geen key nodig) */
 const KNMI_WMS='https://anonymous.api.dataplatform.knmi.nl/wms/adaguc-server?DATASET=radar_reflectivity_composites';
-const KNMI_WMS_FC='https://anonymous.api.dataplatform.knmi.nl/wms/adaguc-server?DATASET=radar_forecast';
+const KNMI_WMS_FC='https://anonymous.api.dataplatform.knmi.nl/wms/adaguc-server?DATASET=radar_forecast_2.0';
 
 async function loadRadar(){
   if(USE_KNMI){return loadRadarBackend();}
@@ -332,11 +332,13 @@ async function loadRadar(){
 /* KNMI WMS hoge-res radar. Eén laag, TIME-animatie.
    2 uur historie in 5-min stappen = 24 frames. */
 async function loadRadarWMS(){
-  const slot=5*60*1000;
-  const base=Math.floor(Date.now()/slot)*slot - slot; // 1 stap terug (latentie)
+  const slot=5*60*1000, step=2; // 10-min stappen: minder frames = soepeler
+  const base=Math.floor(Date.now()/slot)*slot - slot;
   frames=[];
-  for(let i=23;i>=0;i--){frames.push({type:'past',time:Math.floor((base-i*slot)/1000),wms:'past'});}
+  for(let i=6;i>=1;i--){frames.push({type:'past',time:Math.floor((base-i*step*slot)/1000)});}
+  frames.push({type:'past',time:Math.floor(base/1000)});
   nowIdx=frames.length-1;
+  for(let i=1;i<=6;i++){frames.push({type:'nc',time:Math.floor((base+i*step*slot)/1000)});}
   cur=nowIdx;$('slider').max=frames.length-1;$('slider').value=cur;
   setExtents();layoutScrub();showFrame(cur);
 }
@@ -355,35 +357,42 @@ function setExtents(){if(frames.length){$('tStart').textContent='-'+Math.round((
 function wmsTimeISO(epoch){return new Date(epoch*1000).toISOString().split('.')[0]+'Z';}
 
 /* Double-buffering: twee WMS-lagen wisselen elkaar af.
-   Terwijl A zichtbaar is laadt B het volgende frame -> soepel, constant geheugen. */
-const WMS_OPTS={layers:'Reflectivity',styles:'radarReflectivity_transparant/nearest',
-  format:'image/png',transparent:true,version:'1.3.0',pane:'radar',
+   Verleden en nowcast zijn aparte datasets, dus elke buffer krijgt de juiste URL.
+   Stijl '/shaded' = vloeiend geïnterpoleerd i.p.v. blokkerig. */
+const WMS_BASE={format:'image/png',transparent:true,version:'1.3.0',pane:'radar',
   opacity:0,crossOrigin:true,tileSize:256,updateWhenIdle:false,keepBuffer:1};
 let wmsA=null,wmsB=null,activeBuf=0;
 function makeWMS(){
-  const l=L.tileLayer.wms(KNMI_WMS+'&',Object.assign({},WMS_OPTS));
+  const l=L.tileLayer.wms(KNMI_WMS+'&',Object.assign({},WMS_BASE,
+    {layers:'precipitation',styles:'precip-smooth-white-to-purple/bilinear'}));
   l.on('tileerror',()=>{});
   l.addTo(map);return l;
 }
 function ensureBuffers(){if(!wmsA){wmsA=makeWMS();wmsB=makeWMS();}}
-function setWMSTime(layer,i){
+
+/* zet buffer op het juiste frame: kiest dataset + laag + tijd.
+   Beide gladde stijlen (bilinear/shaded) i.p.v. blokkerig 'nearest'. */
+function setWMSFrame(layer,i){
+  const f=frames[i];
+  const isFc=f.type==='nc';
+  layer._url=(isFc?KNMI_WMS_FC:KNMI_WMS)+'&';
   const p=Object.assign({},layer.wmsParams);
-  if(i===nowIdx){delete p.time;}else{p.time=wmsTimeISO(frames[i].time);}
+  p.layers = isFc?'precipitation_nowcast':'precipitation';
+  p.styles = isFc?'rainrate-blue-to-purple/shaded':'precip-smooth-white-to-purple/bilinear';
+  if(i===nowIdx){delete p.time;}else{p.time=wmsTimeISO(f.time);}
   layer.wmsParams=p;layer.setParams(p);
 }
-/* laad frame i in de inactieve buffer en wissel zodra geladen */
 let swapPending=null;
 function showWMSFrame(i){
   ensureBuffers();
   const front=activeBuf===0?wmsA:wmsB;
   const back =activeBuf===0?wmsB:wmsA;
-  setWMSTime(back,i);
+  setWMSFrame(back,i);
   const op=radarOn?radarOpacity:0;
   clearTimeout(swapPending);
   const doSwap=()=>{back.setOpacity(op);front.setOpacity(0);activeBuf=1-activeBuf;};
-  // wissel zodra tiles klaar zijn, of uiterlijk na 700ms (voorkomt vastlopen)
   back.once('load',doSwap);
-  swapPending=setTimeout(doSwap,700);
+  swapPending=setTimeout(doSwap,900);
 }
 
 function rLayer(i){ // alleen voor backend-modus (per-frame overlay)
