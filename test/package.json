@@ -1,0 +1,17 @@
+{
+  "name": "doppler-test",
+  "private": true,
+  "description": "Browsertest voor de Doppler-app met nagebootste databronnen",
+  "scripts": {
+    "test": "node test.js",
+    "test:nocors": "NOCORS=1 node test.js",
+    "test:traag": "LAT=1200 node test.js"
+  },
+  "dependencies": {
+    "leaflet": "1.9.4",
+    "pngjs": "^7.0.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}
