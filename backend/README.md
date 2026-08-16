@@ -50,14 +50,31 @@ De backend gebruikt dan automatisch die i.p.v. de anonieme.
 3. Settings → Pages → Deploy from branch → main → /root.
 4. App komt op `https://<jouwnaam>.github.io/doppler/`.
 
-Zolang `BACKEND` leeg is, gebruikt de app automatisch RainViewer (werkt
-meteen, lagere resolutie). Zodra je de Railway-URL invult, schakelt 'ie
-over op KNMI hoge-resolutie radar + echte nowcast + celdetectie.
+Zolang `BACKEND` leeg is, haalt de app de radar rechtstreeks bij de KNMI
+WMS-server (werkt meteen, geen key nodig). Zodra je de Railway-URL invult,
+schakelt 'ie over op deze backend: dezelfde hoge-resolutie radar, plus
+celdetectie uit de echte reflectiviteit in plaats van uit bliksemclusters.
 
-## Lokaal testen (optioneel)
+## Lokaal draaien
 ```
 pip install -r requirements.txt
-export KNMI_API_KEY=<jouw key>
 uvicorn server:app --reload
 # open http://localhost:8000/healthz
 ```
+Een eigen `KNMI_API_KEY` is optioneel; zonder wordt de publieke anonieme key
+gebruikt. Vlak na het starten is `frames` nog 0 — de eerste ophaalronde duurt
+ongeveer een minuut.
+
+## Testen
+```
+python3 test_reproject.py
+```
+Controleert de georeferentie en de hele keten (HDF5 lezen → PNG → celdetectie)
+met een synthetisch KNMI-bestand, dus zonder netwerk.
+
+De belangrijkste controle gaat over hoe het beeld op de kaart landt. De app
+plaatst de PNG met `L.imageOverlay` op een lat/lon-rechthoek, en Leaflet rekt
+dat lineair uit in *geprojecteerde* ruimte. Een doelraster met gelijke stappen
+in breedtegraad staat daardoor niet waar Leaflet het tekent: over Nederland
+maximaal 14 km, gemiddeld 9 km. `target_latitudes()` verdeelt daarom
+gelijkmatig over mercator-Y. De test faalt als dat wordt teruggedraaid.
