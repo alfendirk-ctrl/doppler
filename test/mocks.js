@@ -51,7 +51,7 @@ const BLANK = (() => {
   return PNG.sync.write(png);
 })();
 
-function meteoBody(url) {
+function meteoBody(url, lowCape) {
   const u = new URL(url);
   const lats = (u.searchParams.get('latitude') || '52').split(',');
   const n = lats.length;
@@ -64,9 +64,15 @@ function meteoBody(url) {
     wind_direction_850hPa: Array.from({ length: 24 }, () => 210),
     wind_direction_500hPa: Array.from({ length: 24 }, () => 250),
   };
+  // een vloeiende band met hoge CAPE dwars over het raster, zodat het
+  // kleurverloop op de kaart te beoordelen is i.p.v. een blokjespatroon
   const one = (i) => ({
     latitude: +lats[i], longitude: 5,
-    current: { cape: 900 + i * 130, precipitation: i % 3 ? 0 : 2.4 },
+    current: {
+      cape: lowCape ? 60 + (i % 5) * 12
+        : Math.max(0, Math.round(2400 * Math.sin((i / Math.max(1, n - 1)) * Math.PI) - 300)),
+      precipitation: i % 3 ? 0 : 2.4,
+    },
     hourly,
   });
   const out = n > 1 ? Array.from({ length: n }, (_, i) => one(i)) : one(0);
@@ -151,7 +157,7 @@ async function install(page, opts = {}) {
   await page.route('**/api.open-meteo.com/**', async route => {
     log.push({ kind: 'meteo', ts: Date.now() });
     await sleep(80);
-    return route.fulfill({ contentType: 'application/json', body: meteoBody(route.request().url()) });
+    return route.fulfill({ contentType: 'application/json', body: meteoBody(route.request().url(), opts.lowCape) });
   });
 
   // Blitzortung websocket

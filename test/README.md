@@ -38,9 +38,16 @@ Elk verzoek naar een niet-nagebootste host wordt geblokkeerd en verschijnt in
 ## Varianten
 
 ```
-npm run test:nocors   # KNMI zonder CORS-headers: moet terugvallen op <img>
-npm run test:traag    # 1200 ms per beeld: moet bufferen i.p.v. desynchroniseren
+npm run test:nocors    # KNMI zonder CORS-headers: moet terugvallen op <img>
+npm run test:traag     # 1200 ms per beeld: moet bufferen i.p.v. desynchroniseren
+npm run test:badlayer  # KNMI stuurt XML-fout met status 200: moet dat melden
+npm run test:lowcape   # nauwelijks CAPE: moet zeggen dat er niets te tonen is
 ```
+
+De GPS wordt altijd nagebootst met een positie die blijft doortikken. Dat
+kan niet via `setGeolocation`: die vuurt `watchPosition` in Chromium niet
+opnieuw af, waardoor juist de herhaalde update — waar de app op stukliep —
+nooit getest werd.
 
 ## Beperking
 
