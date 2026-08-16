@@ -160,6 +160,39 @@ async function install(page, opts = {}) {
     return route.fulfill({ contentType: 'application/json', body: meteoBody(route.request().url(), opts.lowCape) });
   });
 
+  // De eigen radarservice (Railway). BACKEND=1 serveert 'm, BACKENDDOWN=1
+  // laat 'm falen zodat de terugval op de KNMI WMS getest wordt.
+  if (opts.backend) {
+    await page.route('**/doppler-backend.test/**', async route => {
+      const u = new URL(route.request().url());
+      log.push({ kind: 'backend', path: u.pathname, ts: Date.now() });
+      if (opts.backendDown) return route.abort('failed');
+      if (u.pathname === '/healthz') {
+        return route.fulfill({ contentType: 'application/json',
+          body: JSON.stringify({ ok: true, frames: 12, cells: 2 }) });
+      }
+      if (u.pathname === '/api/frames') {
+        const now = Math.floor(Date.now() / 1000 / 300) * 300;
+        const frames = [];
+        for (let i = 5; i >= 0; i--) frames.push({ id: 'p' + i, time: now - i * 600, type: 'past', bounds: [49.36, 0, 55.97, 10.86] });
+        for (let i = 1; i <= 6; i++) frames.push({ id: 'n' + i, time: now + i * 600, type: 'nowcast', bounds: [49.36, 0, 55.97, 10.86] });
+        return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ frames, updated: now }) });
+      }
+      if (u.pathname === '/api/cells') {
+        return route.fulfill({ contentType: 'application/json',
+          body: JSON.stringify({ cells: [
+            { lat: 52.1, lon: 5.2, max_dbz: 57.5, size: 180 },
+            { lat: 51.7, lon: 4.6, max_dbz: 46.0, size: 60 }] }) });
+      }
+      if (u.pathname.startsWith('/api/radar/')) {
+        await sleep(latency);
+        const phase = Math.abs(hashCode(u.pathname)) % 20;
+        return route.fulfill({ contentType: 'image/png', body: radarTile(700, 700, phase) });
+      }
+      return route.fulfill({ status: 404, body: 'nope' });
+    });
+  }
+
   // Blitzortung websocket
   await page.routeWebSocket(/blitzortung\.org/, ws => {
     log.push({ kind: 'ws-open', ts: Date.now() });

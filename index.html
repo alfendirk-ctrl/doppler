@@ -309,14 +309,31 @@ body.drive .thumb{width:32px;height:32px}
 'use strict';
 const $=id=>document.getElementById(id);
 const HOME=[51.886,5.434];
-/* ============================================================
-   BACKEND — vul hier je Railway-URL in voor KNMI hoge-res radar.
-   Leeg laten = KNMI WMS hoge-res radar direct (geen backend nodig).
-   Voorbeeld: const BACKEND="https://doppler-backend.up.railway.app";
-   ============================================================ */
-const BACKEND="";
-const USE_KNMI=BACKEND.length>0;
 const store={get(k,d){try{const v=JSON.parse(localStorage.getItem('dop_'+k));return v==null?d:v;}catch(e){return d;}},set(k,v){try{localStorage.setItem('dop_'+k,JSON.stringify(v));}catch(e){}}};
+
+/* ============================================================
+   BACKEND — de eigen radarservice (Railway).
+   Leeg = radar rechtstreeks bij de KNMI WMS-server; werkt zonder meer.
+
+   Je hoeft hiervoor geen code aan te passen. Open de app één keer met
+   de URL erachter, dan onthoudt hij het:
+     .../doppler/?backend=https://iets.up.railway.app
+   Weer uitzetten:
+     .../doppler/?backend=
+
+   Hapert de backend, dan valt de app vanzelf terug op de KNMI WMS —
+   liever rechtstreekse radar dan een leeg scherm.
+   ============================================================ */
+const BACKEND_DEFAULT="";
+let BACKEND=BACKEND_DEFAULT,backendOn=false,backendDown=false,mode='wms';
+(function(){
+  const m=location.search.match(/[?&]backend=([^&]*)/);
+  if(m)store.set('backend',decodeURIComponent(m[1]).trim().replace(/\/+$/,''));
+  const s=store.get('backend',null);
+  if(s!=null)BACKEND=s;
+  backendOn=BACKEND.length>0;
+})();
+const isBackend=()=>mode==='backend';
 
 let savedView=store.get('view',null);
 // veiligheidsklep: onbruikbare opgeslagen positie -> terug naar Tiel
@@ -341,13 +358,26 @@ let host='',frames=[],nowIdx=0,cur=0,radarOpacity=store.get('opacity',82)/100,ra
 const KNMI_WMS='https://anonymous.api.dataplatform.knmi.nl/wms/adaguc-server?DATASET=radar_reflectivity_composites';
 const KNMI_WMS_FC='https://anonymous.api.dataplatform.knmi.nl/wms/adaguc-server?DATASET=radar_forecast_2.0';
 
+/* Backend als die er is, anders de KNMI WMS. Faalt de backend, dan vallen we
+   terug — maar we blijven het bij elke verversing opnieuw proberen, zodat een
+   koude start of een korte storing zichzelf herstelt. */
 async function loadRadar(){
-  if(USE_KNMI){return loadRadarBackend();}
+  if(backendOn){
+    try{
+      const r=await loadRadarBackend();
+      if(backendDown){backendDown=false;toast('Eigen radarservice weer bereikbaar',3000);}
+      return r;
+    }catch(e){
+      if(!backendDown){backendDown=true;
+        toast('Eigen radarservice niet bereikbaar — radar rechtstreeks bij KNMI',5000);}
+    }
+  }
   return loadRadarWMS();
 }
 /* KNMI WMS hoge-res radar. Eén laag, TIME-animatie.
    2 uur historie in 5-min stappen = 24 frames. */
 async function loadRadarWMS(){
+  mode='wms';
   const slot=5*60*1000, step=2; // 10-min stappen: minder frames = soepeler
   const base=Math.floor(Date.now()/slot)*slot - slot;
   frames=[];
@@ -359,10 +389,16 @@ async function loadRadarWMS(){
   setExtents();layoutScrub();resetBuffer();showFrame(cur);
 }
 async function loadRadarBackend(){
-  const r=await fetch(BACKEND+'/api/frames');
+  // harde tijdslimiet: een koud startende Railway-instantie mag de app niet
+  // laten hangen, dan vallen we liever terug op de KNMI WMS
+  const ac=new AbortController(),to=setTimeout(()=>ac.abort(),8000);
+  let r;
+  try{r=await fetch(BACKEND+'/api/frames',{signal:ac.signal});}finally{clearTimeout(to);}
   if(!r.ok)throw new Error('backend frames '+r.status);
   const j=await r.json();
+  if(!j.frames||!j.frames.length)throw new Error('backend heeft nog geen frames');
   frames=j.frames.map(f=>({type:f.type==='nowcast'?'nc':'past',time:f.time,id:f.id,bounds:f.bounds}));
+  mode='backend';   // vóór resetBuffer: die bepaalt hiermee de frame-URLs
   nowIdx=frames.map(f=>f.type).lastIndexOf('past');if(nowIdx<0)nowIdx=frames.length-1;
   cur=nowIdx;$('slider').max=frames.length-1;$('slider').value=cur;
   setExtents();layoutScrub();resetBuffer();showFrame(cur);
@@ -419,9 +455,9 @@ function wmsUrl(i,v){
 function resetBuffer(){
   const g=++bufGen;
   const old=buf;
-  const v=USE_KNMI?null:computeView();
+  const v=isBackend()?null:computeView();
   if(v)viewKey=v.key;
-  buf=frames.map((f,i)=>USE_KNMI
+  buf=frames.map((f,i)=>isBackend()
     ?{url:BACKEND+'/api/radar/'+f.id+'.png',
       bounds:L.latLngBounds([f.bounds[0],f.bounds[1]],[f.bounds[2],f.bounds[3]]),state:'idle',obj:null}
     :{url:wmsUrl(i,v),bounds:v.bounds,state:'idle',obj:null});
@@ -590,7 +626,7 @@ setInterval(ageStrikes,3000);
 let cellsOn=store.get('on_cells',false),cellLayer=L.layerGroup(),cellHist=[];cellLayer.addTo(map);
 let knmiCellHist=[];
 async function loadCellsKNMI(){
-  if(!USE_KNMI)return;
+  if(!isBackend())return;
   try{
     const r=await fetch(BACKEND+'/api/cells');const j=await r.json();
     if(!cellsOn){return;}
@@ -608,7 +644,7 @@ async function loadCellsKNMI(){
   }catch(e){}
 }
 function detectCells(){
-  if(USE_KNMI){loadCellsKNMI();return;}
+  if(isBackend()){loadCellsKNMI();return;}
   cellLayer.clearLayers();if(!cellsOn)return;
   const recent=strikes.filter(s=>Date.now()-s.t<900000),grid={};
   recent.forEach(s=>{const k=Math.round(s.lat*5)/5+'_'+Math.round(s.lon*5)/5;(grid[k]=grid[k]||[]).push(s);});
@@ -773,6 +809,16 @@ function openExplain(key){
   $('exIc').innerHTML=EX_ICONS[key]||'';
   $('exTitle').textContent=d.t;$('exSub').textContent=d.s;
   $('exBody').textContent=d.b;$('exTip').innerHTML=d.tip;
+  // bij radar erbij zetten waar het beeld vandaan komt — zo kun je zien
+  // of de eigen radarservice daadwerkelijk gebruikt wordt
+  if(key==='radar'){
+    const bron=isBackend()
+      ? 'Eigen radarservice — hoge resolutie, cellen uit echte reflectiviteit.'
+      : backendOn
+        ? 'KNMI WMS rechtstreeks. De eigen radarservice is ingesteld maar niet bereikbaar.'
+        : 'KNMI WMS rechtstreeks.';
+    $('exTip').innerHTML=d.tip+'<br><br><b>Bron nu:</b> '+bron;
+  }
   $('explain').classList.add('open');
 }
 $('exClose').onclick=()=>$('explain').classList.remove('open');
@@ -791,7 +837,7 @@ document.querySelectorAll('.lchip').forEach(chip=>{let press=null;
     const on=!chip.classList.contains('on');chip.classList.toggle('on',on);store.set('on_'+l,on);
     if(l==='radar'){radarOn=on;applyRadarOpacity();}
     if(l==='bolt'){boltOn=on;if(on){boltConnect();boltLayer.addTo(map);}else{boltLayer.clearLayers();if(ws)try{ws.close();}catch(_){}}}
-    if(l==='cells'){cellsOn=on;detectCells();if(on)toast(USE_KNMI?'Cellen uit KNMI-reflectiviteit + bewegingsvector':'Cellen uit bliksemclusters + bewegingsvector');}
+    if(l==='cells'){cellsOn=on;detectCells();if(on)toast(isBackend()?'Cellen uit KNMI-reflectiviteit + bewegingsvector':'Cellen uit bliksemclusters + bewegingsvector');}
     if(l==='cape'){capeOn=on;loadCape(on);}
     if(l==='sat'){satOn=on;toggleSat(on);}
     if(l==='hail'){hailOn=on;loadHail();if(on)toast('Hagel-potentieel: CAPE × windschering');}});
@@ -848,7 +894,7 @@ $('driveBtn').onclick=()=>{document.body.classList.toggle('drive');const on=docu
 let moveT=null;
 map.on('moveend',()=>{store.set('view',{c:[map.getCenter().lat,map.getCenter().lng],z:map.getZoom()});clearTimeout(moveT);moveT=setTimeout(()=>{
     // verschoven of gezoomd: de radarbeelden gelden voor de oude viewport
-    if(!USE_KNMI&&frames.length&&computeView().key!==viewKey){resetBuffer();showFrame(cur);}
+    if(!isBackend()&&frames.length&&computeView().key!==viewKey){resetBuffer();showFrame(cur);}
     if(capeOn)loadCape();if(hailOn)loadHail();updateThreat();if(sheetOpen){const c=map.getCenter();$('shLoc').textContent=c.lat.toFixed(2)+'N '+c.lng.toFixed(2)+'E';}},700);});
 
 setInterval(async()=>{const wasNow=cur===nowIdx;const keepCur=cur;
