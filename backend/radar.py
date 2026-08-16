@@ -46,6 +46,26 @@ def _build_lut():
 
 LUT = _build_lut()
 
+# Web-mercator straal (EPSG:3857)
+_R_MERC = 6378137.0
+
+
+def target_latitudes(north, south, out_h):
+    """
+    De breedtegraden van de rijen van het doelraster.
+
+    De app plaatst de PNG met L.imageOverlay op een lat/lon-rechthoek, en
+    Leaflet rekt dat beeld lineair uit in *geprojecteerde* ruimte. Een raster
+    met gelijke stappen in breedtegraad komt daardoor niet overeen met waar
+    Leaflet de rijen tekent: over Nederland loopt dat op tot enkele kilometers,
+    het grootst in het midden van het domein. Daarom verdelen we gelijkmatig
+    over mercator-Y en rekenen we dat terug naar breedtegraad.
+    """
+    y_north = _R_MERC * np.log(np.tan(np.pi / 4 + np.radians(north) / 2))
+    y_south = _R_MERC * np.log(np.tan(np.pi / 4 + np.radians(south) / 2))
+    y = np.linspace(y_north, y_south, out_h)
+    return np.degrees(2 * np.arctan(np.exp(y / _R_MERC)) - np.pi / 2)
+
 
 def read_knmi_hdf5(raw_bytes, image_group="image1"):
     """
@@ -133,9 +153,11 @@ def reproject_to_png(dbz, proj4, corners, out_w=900, out_h=900):
     px0, px1 = min(cxs), max(cxs)
     py0, py1 = min(cys), max(cys)
 
-    # doelraster lat/lon (regelmatig)
+    # Doelraster. In mercator is x lineair in lengtegraad, dus tlon is gewoon
+    # regelmatig; de rijen verdelen we gelijkmatig over mercator-Y zodat het
+    # beeld past op hoe Leaflet het straks uitrekt.
     tlon = np.linspace(west, east, out_w)
-    tlat = np.linspace(north, south, out_h)  # noord boven
+    tlat = target_latitudes(north, south, out_h)  # noord boven
     LON, LAT = np.meshgrid(tlon, tlat)
 
     # naar proj
