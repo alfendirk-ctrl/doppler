@@ -6,7 +6,8 @@
     "test": "node test.js",
     "test:nocors": "NOCORS=1 node test.js",
     "test:traag": "LAT=1200 node test.js",
-    "test:badlayer": "BADLAYER=1 node test.js"
+    "test:badlayer": "BADLAYER=1 node test.js",
+    "test:lowcape": "LOWCAPE=1 node test.js"
   },
   "dependencies": {
     "leaflet": "1.9.4",

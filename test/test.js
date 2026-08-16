@@ -108,6 +108,7 @@ function mapZoom(page) {
     tileLatency: +(process.env.LAT || 550),
     noCors: process.env.NOCORS === '1',
     badLayer: process.env.BADLAYER === '1',
+    lowCape: process.env.LOWCAPE === '1',
   });
   await page.addInitScript(PROBE);
 
@@ -151,6 +152,12 @@ function mapZoom(page) {
   await page.click('[data-l=cells]');
   await page.click('[data-l=cape]');
   await page.waitForTimeout(1800);
+  const capeToast = await page.evaluate(() => {
+    const t = document.getElementById('toast');
+    return t.classList.contains('show') ? t.textContent : '';
+  });
+  const capeOverlays = await page.evaluate(() =>
+    document.querySelectorAll('.leaflet-cape-pane img').length);
   await page.screenshot({ path: path.join(OUT, '04-layers.png') });
 
   await page.click('#driveBtn');
@@ -272,6 +279,7 @@ function mapZoom(page) {
       scrubRefetch: afterScrub - beforeScrub,  // verwacht: 0
       overlaySrcScheme: blobs.overlaySrcs,     // verwacht: blob:
     },
+    cape: { melding: capeToast, beeldlagen: capeOverlays },
     gps: {
       zoomNaVergrendelen: zAfterLock,   // verwacht: 9, één keer centreren
       zoomNaUitzoomen: zAfterZoomOut,   // verwacht: lager dan 9

@@ -625,14 +625,60 @@ setInterval(detectCells,8000);
 function updateBadges(){const recent=strikes.filter(s=>Date.now()-s.t<900000);const b=document.querySelector('[data-l=bolt]');let bd=b.querySelector('.badge');
   if(recent.length>0){if(!bd){bd=document.createElement('span');bd.className='badge';b.appendChild(bd);}bd.textContent=recent.length>999?'999+':recent.length;}else if(bd)bd.remove();}
 
+/* CAPE-veld op de kaart.
+   Was: 6×6 vakken, dekking .05 onder 100 J/kg en .30 erboven. Die harde
+   drempel maakte van 99 vs 101 J/kg het verschil tussen onzichtbaar en een
+   vol gekleurd blok — je zag een grens in de code, niet in het weer.
+   Nu: fijner raster, dekking loopt vloeiend mee, en onder CAPE_MIN tekenen
+   we niets. Groen is hier bewust weg: in de rest van de app betekent groen
+   'rustig', terwijl het hier juist méér energie aanduidde dan de vakken
+   die je niet zag. */
+const CAPE_MIN=250;   // daaronder gebeurt er voor chasen niets
 let capeOn=store.get('on_cape',false),capeLayer=L.layerGroup();capeLayer.addTo(map);
-async function loadCape(){capeLayer.clearLayers();if(!capeOn)return;const b=map.getBounds(),pts=[],R=6;
+async function loadCape(announce){capeLayer.clearLayers();if(!capeOn)return;const b=map.getBounds(),pts=[],R=8;
   for(let i=0;i<R;i++)for(let j=0;j<R;j++)pts.push([b.getSouth()+(b.getNorth()-b.getSouth())*i/(R-1),b.getWest()+(b.getEast()-b.getWest())*j/(R-1)]);
   try{const u=`https://api.open-meteo.com/v1/forecast?latitude=${pts.map(p=>p[0].toFixed(2)).join(',')}&longitude=${pts.map(p=>p[1].toFixed(2)).join(',')}&current=cape&timezone=auto`;
     const r=await fetch(u);const j=await r.json();const arr=Array.isArray(j)?j:[j];
     const dlat=(b.getNorth()-b.getSouth())/(R-1)/2,dlon=(b.getEast()-b.getWest())/(R-1)/2;
-    arr.forEach((d,k)=>{const c=d.current&&d.current.cape!=null?d.current.cape:0;L.rectangle([[pts[k][0]-dlat,pts[k][1]-dlon],[pts[k][0]+dlat,pts[k][1]+dlon]],{pane:'cape',stroke:false,fillColor:capeColor(c),fillOpacity:c>100?.3:.05}).addTo(capeLayer);});
+    /* Eén raster van R×R pixels, door de browser bilineair opgeschaald.
+       Dat geeft een vloeiend veld i.p.v. zichtbare vakranden, en het is
+       één <img> in plaats van 64 SVG-vlakken — ook lichter tijdens pannen. */
+    const src=document.createElement('canvas');src.width=R;src.height=R;
+    const sctx=src.getContext('2d'),id=sctx.createImageData(R,R);
+    let drawn=0,top=0;
+    for(let i=0;i<R;i++)for(let j=0;j<R;j++){
+      const k=i*R+j,d=arr[k];
+      const c=d&&d.current&&d.current.cape!=null?d.current.cape:0;
+      if(c>top)top=c;
+      // rij 0 van het beeld is noord, terwijl i van zuid naar noord loopt
+      const px=((R-1-i)*R+j)*4;
+      if(c<CAPE_MIN){id.data[px+3]=0;continue;}
+      drawn++;
+      const rgb=capeFieldColor(c);
+      id.data[px]=parseInt(rgb.substr(1,2),16);
+      id.data[px+1]=parseInt(rgb.substr(3,2),16);
+      id.data[px+2]=parseInt(rgb.substr(5,2),16);
+      id.data[px+3]=Math.round(capeFieldOpacity(c)*255);
+    }
+    sctx.putImageData(id,0,0);
+    if(drawn){
+      const dst=document.createElement('canvas');dst.width=R*24;dst.height=R*24;
+      const dctx=dst.getContext('2d');
+      dctx.imageSmoothingEnabled=true;dctx.imageSmoothingQuality='high';
+      dctx.drawImage(src,0,0,dst.width,dst.height);
+      // het raster loopt tot de randpunten; een halve cel marge laat het
+      // beeld precies het gebied dekken dat de meetpunten beschrijven
+      L.imageOverlay(dst.toDataURL('image/png'),
+        [[b.getSouth()-dlat,b.getWest()-dlon],[b.getNorth()+dlat,b.getEast()+dlon]],
+        {pane:'cape',opacity:1,interactive:false}).addTo(capeLayer);
+    }
+    // niets tekenen kan kloppen; zeg dat dan ook, anders lijkt de laag stuk
+    if(announce&&!drawn)toast('Weinig onweer-energie in beeld — hoogste is '+Math.round(top)+' J/kg',3800);
   }catch(e){toast('CAPE-data niet beschikbaar');}}
+/* schaal voor het kaartveld: begint bij geel, want onder CAPE_MIN tekenen we niet */
+function capeFieldColor(c){return c>2200?'#e23b3b':c>1500?'#f0602a':c>900?'#f08020':c>500?'#f5c518':'#f0dc6a';}
+function capeFieldOpacity(c){return Math.max(.06,Math.min(.42,.06+(c-CAPE_MIN)/2250*.36));}
+/* schaal voor de balk in het onweer-paneel: daar is groen wél 'rustig' */
 function capeColor(c){return c>2500?'#e23b3b':c>1500?'#f08020':c>800?'#f5c518':c>300?'#c3e84a':c>100?'#3fc97a':'#a8d5ff';}
 
 let satOn=false,satLayer=null; // niet automatisch herstellen (voorkomt zwart scherm bij laadfout)
@@ -746,7 +792,7 @@ document.querySelectorAll('.lchip').forEach(chip=>{let press=null;
     if(l==='radar'){radarOn=on;applyRadarOpacity();}
     if(l==='bolt'){boltOn=on;if(on){boltConnect();boltLayer.addTo(map);}else{boltLayer.clearLayers();if(ws)try{ws.close();}catch(_){}}}
     if(l==='cells'){cellsOn=on;detectCells();if(on)toast(USE_KNMI?'Cellen uit KNMI-reflectiviteit + bewegingsvector':'Cellen uit bliksemclusters + bewegingsvector');}
-    if(l==='cape'){capeOn=on;loadCape();}
+    if(l==='cape'){capeOn=on;loadCape(on);}
     if(l==='sat'){satOn=on;toggleSat(on);}
     if(l==='hail'){hailOn=on;loadHail();if(on)toast('Hagel-potentieel: CAPE × windschering');}});
   if(chip.dataset.l==='radar'){
