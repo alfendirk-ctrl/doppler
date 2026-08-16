@@ -109,10 +109,15 @@ function mapZoom(page) {
     noCors: process.env.NOCORS === '1',
     badLayer: process.env.BADLAYER === '1',
     lowCape: process.env.LOWCAPE === '1',
+    backend: process.env.BACKEND === '1' || process.env.BACKENDDOWN === '1',
+    backendDown: process.env.BACKENDDOWN === '1',
   });
   await page.addInitScript(PROBE);
 
-  await page.goto(APP, { waitUntil: 'domcontentloaded' });
+  const appUrl = (process.env.BACKEND === '1' || process.env.BACKENDDOWN === '1')
+    ? APP + '?backend=https://doppler-backend.test'
+    : APP;
+  await page.goto(appUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(3500);
   await page.screenshot({ path: path.join(OUT, '01-start.png') });
 
@@ -223,6 +228,15 @@ function mapZoom(page) {
   const watchesAfterOn = await page.evaluate(() => Object.keys(window.__watches).length);
   const geoCalls = await page.evaluate(() => window.__geoCalls);
 
+  // Onthoudt de app de backend-URL na herladen zónder ?backend= erachter?
+  let backendOnthouden = null;
+  if (process.env.BACKEND === '1') {
+    const voor = netlog.filter(n => n.kind === 'backend').length;
+    await page.goto(APP, { waitUntil: 'domcontentloaded' });   // zonder parameter
+    await page.waitForTimeout(4000);
+    backendOnthouden = netlog.filter(n => n.kind === 'backend').length > voor;
+  }
+
   const state = await page.evaluate(() => ({
     clk: document.getElementById('clk').textContent,
     status: document.getElementById('sttx').textContent,
@@ -280,6 +294,12 @@ function mapZoom(page) {
       overlaySrcScheme: blobs.overlaySrcs,     // verwacht: blob:
     },
     cape: { melding: capeToast, beeldlagen: capeOverlays },
+    backend: {
+      aangeroepen: [...new Set(netlog.filter(n => n.kind === 'backend').map(n => n.path.replace(/\/api\/radar\/.*/, '/api/radar/*')))],
+      radarBeelden: netlog.filter(n => n.kind === 'backend' && n.path.startsWith('/api/radar/')).length,
+      knmiWmsGebruikt: netlog.filter(n => n.kind === 'wms').length,
+      onthoudenNaHerladen: backendOnthouden,
+    },
     gps: {
       zoomNaVergrendelen: zAfterLock,   // verwacht: 9, één keer centreren
       zoomNaUitzoomen: zAfterZoomOut,   // verwacht: lager dan 9

@@ -42,7 +42,13 @@ npm run test:nocors    # KNMI zonder CORS-headers: moet terugvallen op <img>
 npm run test:traag     # 1200 ms per beeld: moet bufferen i.p.v. desynchroniseren
 npm run test:badlayer  # KNMI stuurt XML-fout met status 200: moet dat melden
 npm run test:lowcape   # nauwelijks CAPE: moet zeggen dat er niets te tonen is
+npm run test:backend   # eigen radarservice: één beeld per frame, geen KNMI WMS
+npm run test:backenddown  # backend plat: moet terugvallen op de KNMI WMS
 ```
+
+`test:backend` opent de app met `?backend=…` tegen een nagebootste Railway-
+service, en controleert ook dat die keuze een herlaadbeurt zonder parameter
+overleeft.
 
 De GPS wordt altijd nagebootst met een positie die blijft doortikken. Dat
 kan niet via `setGeolocation`: die vuurt `watchPosition` in Chromium niet

@@ -41,14 +41,27 @@ De backend gebruikt dan automatisch die i.p.v. de anonieme.
 6. Test: open `https://<iets>.up.railway.app/healthz`
    → `{"ok":true,"has_key":true,...}` en na ~1 min `"frames">0`.
 
-## STAP 3 — Frontend (GitHub Pages)
-1. Repo `doppler`, bestand `index.html` (de Doppler-app).
-2. In de app-code staat bovenaan:
-   `const BACKEND = "";`
-   Vul daar je Railway-URL in:
-   `const BACKEND = "https://<iets>.up.railway.app";`
-3. Settings → Pages → Deploy from branch → main → /root.
-4. App komt op `https://<jouwnaam>.github.io/doppler/`.
+## STAP 3 — De app op de backend zetten
+**Geen code aanpassen nodig.** Open de app één keer met de Railway-URL erachter:
+
+```
+https://alfendirk-ctrl.github.io/doppler/?backend=https://<iets>.up.railway.app
+```
+
+Dat wordt onthouden, ook na herladen en na het sluiten van je browser. Weer
+terug naar de KNMI WMS rechtstreeks:
+
+```
+https://alfendirk-ctrl.github.io/doppler/?backend=
+```
+
+Controleren welke bron actief is: tik op het `?`-bolletje bij de Radar-knop.
+Onderaan die kaart staat "Bron nu".
+
+Hapert de backend — koude start, storing, verkeerde URL — dan valt de app na
+8 seconden vanzelf terug op de KNMI WMS en meldt dat. Bij elke verversing
+(elke 2 minuten) probeert hij de backend opnieuw, dus een korte storing
+herstelt zichzelf. Je zit dus nooit zonder radar.
 
 Zolang `BACKEND` leeg is, haalt de app de radar rechtstreeks bij de KNMI
 WMS-server (werkt meteen, geen key nodig). Zodra je de Railway-URL invult,
