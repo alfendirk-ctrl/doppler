@@ -1,0 +1,84 @@
+# Controleert een gedeployede Doppler-backend van buitenaf.
+#
+# Handmatig te starten via Actions -> "Backend checken" -> Run workflow,
+# met de Railway-URL als invoer. Draait op een GitHub-runner, dus dit werkt
+# ook als je zelf niet bij de service kunt.
+name: Backend checken
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'URL van de backend, bijv. https://iets.up.railway.app'
+        required: true
+        type: string
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Alle endpoints langslopen
+        env:
+          # via env, niet rechtstreeks in het script: anders is de invoer
+          # een injectiepad naar de shell
+          URL: ${{ inputs.url }}
+          ORIGIN: https://alfendirk-ctrl.github.io
+        run: |
+          URL="${URL%/}"
+          echo "Backend: $URL"
+          echo
+
+          echo "=== /healthz ==="
+          curl -sS --max-time 30 -w '\nHTTP %{http_code} in %{time_total}s\n' "$URL/healthz" \
+            || echo 'ONBEREIKBAAR'
+          echo
+
+          echo "=== /api/frames ==="
+          curl -sS --max-time 30 -o /tmp/frames.json -w 'HTTP %{http_code}\n' "$URL/api/frames" \
+            || echo 'ONBEREIKBAAR'
+          head -c 900 /tmp/frames.json 2>/dev/null; echo
+          python3 - <<'PY' 2>/dev/null || echo '(nog geen frames om te tellen)'
+          import json
+          d = json.load(open('/tmp/frames.json'))
+          f = d.get('frames', [])
+          print(f"\naantal frames: {len(f)}")
+          if f:
+              past = [x for x in f if x['type'] == 'past']
+              nc = [x for x in f if x['type'] == 'nowcast']
+              print(f"  verleden: {len(past)}, nowcast: {len(nc)}")
+              print(f"  bounds eerste frame: {f[0].get('bounds')}")
+          PY
+          echo
+
+          echo "=== /api/cells ==="
+          curl -sS --max-time 30 -w '\nHTTP %{http_code}\n' "$URL/api/cells" | head -c 500
+          echo
+
+          echo "=== CORS vanaf de Pages-origin ==="
+          # zonder deze header weigert de browser de data, ook als curl 'm wel krijgt
+          curl -sS -o /dev/null -D - --max-time 30 \
+            -H "Origin: $ORIGIN" "$URL/api/frames" 2>/dev/null \
+            | grep -i 'access-control-allow-origin' \
+            || echo 'GEEN CORS-HEADER — de app kan hier niet bij'
+          echo
+
+          echo "=== eerste radarbeeld ophalen ==="
+          FID=$(python3 -c "import json;print(json.load(open('/tmp/frames.json'))['frames'][0]['id'])" 2>/dev/null || true)
+          if [ -n "$FID" ]; then
+            curl -sS --max-time 60 -o /tmp/f.png \
+              -w 'HTTP %{http_code}, %{size_download} bytes, type %{content_type}\n' \
+              "$URL/api/radar/$FID.png" || echo 'ophalen mislukt'
+            python3 - <<'PY' || true
+          import struct
+          d = open('/tmp/f.png', 'rb').read()
+          ok = d[:8] == b'\x89PNG\r\n\x1a\n'
+          print('geldige PNG:', ok)
+          if ok:
+              w, h = struct.unpack('>II', d[16:24])
+              print(f'afmeting: {w} x {h}')
+          else:
+              print('eerste 200 tekens:', d[:200])
+          PY
+          else
+            echo 'geen frame-id beschikbaar, beeldtest overgeslagen'
+          fi
